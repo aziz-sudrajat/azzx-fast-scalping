@@ -29,7 +29,7 @@ import sys
 from . import config as cfg_mod
 from .risk import RiskGuard
 from .live_loop import (AlternatingTrader, _build_broker, _build_data,
-                        _now_wib, fmt_price)
+                        _now_wib, fmt_price, paint)
 from .exchanges import SUPPORTED, get_exchange
 
 
@@ -96,6 +96,24 @@ def main(argv=None) -> int:
     exchange = args["exchange"]
     data = _build_data(mode, exchange)
     broker = _build_broker(mode, exchange)
+
+    # --- pre-flight: validasi credential (gagal cepat sebelum order) ---
+    if mode in ("testnet", "live"):
+        try:
+            bal = broker.get_balance()
+            print(f"[{_now_wib()}] [{mode}] koneksi {exchange} OK, "
+                  f"saldo wallet: {bal:.2f} USDT", flush=True)
+        except Exception as e:
+            raise SystemExit(f"[{mode}] credential {exchange} GAGAL: {e}\n"
+                             f"cek API key/secret/passphrase di environment.")
+        if mode == "live":
+            print(paint("!" * 60, "red", "bold"), flush=True)
+            print(paint("  !! MODE LIVE — UANG ASLI !!", "red", "bold"),
+                  flush=True)
+            print(paint(f"  {exchange} {symbol} | margin {args['margin']} USDT "
+                        f"x{args['lev']} = {args['margin']*args['lev']:.2f} USDT notional",
+                        "red", "bold"), flush=True)
+            print(paint("!" * 60, "red", "bold"), flush=True)
 
     # --- set leverage & margin type (testnet/live via API; paper simulasi) ---
     if mode in ("testnet", "live"):

@@ -132,6 +132,14 @@ class BitgetExchangeBroker(LocalPositionTracker):
                     "side": "BUY" if row.get("holdSide") == "long" else "SELL"}
         return None
 
+    def get_balance(self) -> float:
+        """Available USDT futures. Juga validasi API key."""
+        data = self._get("/api/v2/mix/account/accounts",
+                         {"productType": "USDT-FUTURES",
+                          "marginCoin": "USDT"})
+        rows = data.get("data") or []
+        return float(rows[0].get("available", "0")) if rows else 0.0
+
     def set_leverage(self, symbol: str, leverage: int) -> dict:
         leverage = int(leverage)
         if not 1 <= leverage <= 125:

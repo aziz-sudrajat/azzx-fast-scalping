@@ -43,6 +43,11 @@ class BinanceExchangeBroker(_BinanceBroker, LocalPositionTracker):
         res.update(self._track_close(symbol, price))
         return res
 
+    def get_balance(self) -> float:
+        """Saldo wallet USDT (futures). Juga validasi API key."""
+        data = self._request("GET", "/fapi/v2/account", {}, signed=True)
+        return float(data.get("totalWalletBalance", "0"))
+
     def set_margin_type(self, symbol: str, margin_type: str) -> dict:
         # BinanceBroker.set_margin_type sudah ada; normalisasi nama
         return super().set_margin_type(symbol,

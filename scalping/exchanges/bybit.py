@@ -131,6 +131,13 @@ class BybitExchangeBroker(LocalPositionTracker):
                     "side": "BUY" if row.get("side") == "Buy" else "SELL"}
         return None
 
+    def get_balance(self) -> float:
+        """Total wallet balance USDT. Juga validasi API key."""
+        data = self._get("/v5/account/wallet-balance",
+                         {"accountType": "UNIFIED"})
+        lst = (data.get("result") or {}).get("list") or []
+        return float(lst[0].get("totalWalletBalance", "0")) if lst else 0.0
+
     def set_leverage(self, symbol: str, leverage: int) -> dict:
         leverage = int(leverage)
         if not 1 <= leverage <= 125:

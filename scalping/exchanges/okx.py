@@ -138,6 +138,12 @@ class OKXExchangeBroker(LocalPositionTracker):
                     "side": "BUY" if row.get("posSide") == "long" else "SELL"}
         return None
 
+    def get_balance(self) -> float:
+        """Total equity USDT. Juga validasi API key."""
+        data = self._get("/api/v5/account/balance", {})
+        rows = data.get("data") or []
+        return float(rows[0].get("totalEq", "0")) if rows else 0.0
+
     def set_leverage(self, symbol: str, leverage: int) -> dict:
         leverage = int(leverage)
         if not 1 <= leverage <= 125:
