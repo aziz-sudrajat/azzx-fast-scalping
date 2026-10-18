@@ -1,91 +1,178 @@
-# azzx-fast-scalping
+# azzx-fast-scalping ⚡
 
-Tools scalping cepat untuk **Binance futures** dengan analisis multi-timeframe (1m/5m/15m): bias arah diambil dari timeframe 15m (EMA21 + MACD histogram), lalu entry dipicu oleh persilangan EMA(9/21) di 1m/5m dengan filter ATR, volume, dan spread.
-
-100% Python stdlib — tanpa dependensi eksternal.
+Tools scalping cepat untuk **futures** (Binance, OKX, Bybit, Bitget).
+Scan coin terbaik → eksekusi otomatis long/short bergantian dengan TP/SL.
 
 ![Demo](assets/demo.gif)
 
-## Instalasi
+100% Python stdlib — tanpa dependensi eksternal. Mulai dari paper (simulasi, tanpa uang asli).
+
+---
+
+## 📦 Instalasi
 
 ```bash
+# 1. Masuk folder project
+cd azzx-fast-scalping
+
+# 2. Buat virtual environment (disarankan)
 python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt   # stdlib only, tidak menginstal apa pun
+source venv/bin/activate        # Linux/Mac
+# venv\Scripts\activate          # Windows
+
+# 3. Install (stdlib only — tidak mengunduh apa pun)
+pip install -r requirements.txt
 ```
 
-## Multi-exchange
+---
 
-Didukung: **binance** (default), **okx**, **bybit**, **bitget**.
+## 🚀 Tutorial: 3 Langkah
+
+### Langkah 1 — Scan coin terbaik
 
 ```bash
-python -m scalping BTCUSDT -e bybit --margin 50 --lev 10 --mode paper
-python -m scalping ETHUSDT -e okx --margin 100 --lev 5 testnet
+python scan.py
 ```
 
-API key via environment (tidak pernah di argumen / file):
+Keluar tabel ranking coin yang paling cocok untuk scalping
+(berdasar volume, volatilitas, dan momentum), plus rekomendasi:
 
-| Exchange | Key env |
-|---|---|
-| binance | `BINANCE_TESTNET_KEY/SECRET`, `BINANCE_LIVE_KEY/SECRET` |
-| okx | `OKX_KEY`, `OKX_SECRET`, `OKX_PASSPHRASE` (+`OKX_DEMO=1` untuk demo) |
-| bybit | `BYBIT_KEY`, `BYBIT_SECRET` |
-| bitget | `BITGET_KEY`, `BITGET_SECRET`, `BITGET_PASSPHRASE` |
+```
+🥇  GTCUSDT    0.23831    +23.8%    $105M    1.97%    91
+🥈  BTWUSDT    2.3115     +18.1%    $283M    3.01%    90
+...
+⭐ Rekomendasi: GTCUSDT (skor 91)
+```
 
-Tanpa `-e`, default = binance.
-
-## Cara menjalankan
-
-Entry point: `python -m scalping.run` (rencana; modul run belum tersedia).
-
-### Mode `paper` (default, aman)
-
-Tidak ada order sungguhan — sinyal hanya dicatat/log.
+### Langkah 2 — Jalankan bot (paper dulu!)
 
 ```bash
-python -m scalping.run --mode paper --symbol BTCUSDT
+python -m scalping GTCUSDT --margin 100 --lev 10 isolated paper
 ```
 
-### Mode `testnet`
+Artinya: pakai **margin 100 USDT**, **leverage 10x** (= posisi 1000 USDT),
+**isolated**, mode **paper** (simulasi, tanpa uang asli).
 
-Terhubung ke Binance Futures testnet. Butuh API key testnet (bukan key akun asli).
+Contoh output:
+
+```
+[07:43:13] OPEN LONG GTCUSDT @ 0.238310 (TP 0.241125 / SL 0.236402)
+07:48:06 | LONG | Entry: 0.238310 | TP: 0.241125 | PnL: +2.17 [TP]
+[07:48:07] OPEN SHORT GTCUSDT @ 0.241125 (TP 0.238310 / SL 0.242980)
+```
+
+- 🟢 Hijau = profit / posisi LONG
+- 🔴 Merah = loss / posisi SHORT
+- Bot bergantian LONG → SHORT → LONG sampai kamu hentikan (`Ctrl+C`)
+
+### Langkah 3 — Pantau lewat dashboard (opsional)
 
 ```bash
-export BINANCE_TESTNET_API_KEY=...
-export BINANCE_TESTNET_API_SECRET=...
-python -m scalping.run --mode testnet --symbol BTCUSDT
+python -m scalping.webui
 ```
 
-### Mode `live`
+Buka http://127.0.0.1:8080 di browser — harga live, P&L sesi,
+dan trade log berwarna yang update otomatis.
 
-Uang sungguhan. Jalankan hanya setelah paper & testnet terbukti stabil.
+---
 
-```bash
-export BINANCE_API_KEY=...
-export BINANCE_API_SECRET=...
-python -m scalping.run --mode live --symbol BTCUSDT
+## 📖 Perintah Lengkap
+
+```
+python -m scalping [SYMBOL] [opsi]
 ```
 
-## ⚠️ Peringatan risiko — baca dulu
-
-- **Scalping di timeframe 1 menit sangat berisiko.** Noise harga tinggi, sinyal palsu sering muncul, dan keputusan harus diambil dalam hitungan detik.
-- **Fee menggerogoti profit.** Dengan target sekecil 1.5× ATR, komisi taker + slippage bisa menghapus edge strategi — backtest WAJIB memasukkan fee dan slippage.
-- **Hasil backtest bukan jaminan profit di masa depan.** Kondisi market berubah; strategi yang bagus di data historis bisa gagal total saat live.
-- **Mulai dari mode paper**, lanjut ke testnet, dan hanya ke live bila keduanya konsisten.
-- **Jangan pakai uang yang tidak siap hilang.** Jangan trading dengan dana kebutuhan pokok, dan jangan pakai leverage berlebihan.
-
-## Parameter utama
-
-| Parameter | Nilai default | Keterangan |
+| Opsi | Contoh | Keterangan |
 |---|---|---|
-| EMA fast / slow | 9 / 21 | Trigger cross di 1m & 5m |
-| Bias timeframe | 15m | EMA21 + MACD histogram |
-| Filter | ATR + volume + spread | Entry hanya bila semua lolos |
-| Take profit | 1.5 × ATR | Target profit per trade |
-| Stop loss | 1.0 × ATR | Batas rugi per trade |
-| Time stop | 15 menit | Tutup paksa bila trade berlarut |
-| Fee & slippage | wajib di backtest | Tanpa ini hasil backtest menipu |
+| `--margin` | `--margin 100` | Modal margin dalam USDT |
+| `--lev` | `--lev 10` | Leverage 1–125 |
+| `isolated` / `cross` | `isolated` | Mode margin (bisa juga `--margin-mode isolated`) |
+| `paper` / `testnet` / `live` | `paper` | Mode trading (bisa juga `--mode paper`) |
+| `-e` | `-e bybit` | Exchange: `binance` (default), `okx`, `bybit`, `bitget` |
+| `--max-trades` | `--max-trades 10` | Berhenti setelah N trade (default: jalan terus) |
 
-## Lisensi
+Contoh lain:
 
-MIT — lihat file `LICENSE`.
+```bash
+# Bybit, margin 50 USDT, lev 20x, paper
+python -m scalping BTCUSDT -e bybit --margin 50 --lev 20 --mode paper
+
+# OKX testnet
+python -m scalping ETHUSDT -e okx --margin 100 --lev 5 testnet
+
+# Cross margin, berhenti setelah 5 trade
+python -m scalping SOLUSDT --margin 200 --lev 10 cross paper --max-trades 5
+```
+
+---
+
+## 🛡️ Mode Trading
+
+| Mode | Uang asli? | Butuh apa? |
+|---|---|---|
+| `paper` | ❌ Tidak | Tidak butuh apa-apa. **Selalu mulai dari sini.** |
+| `testnet` | ❌ Tidak | API key testnet/demo dari exchange |
+| `live` | ✅ **YA** | API key asli + `--i-understand` |
+
+### Testnet
+
+Daftar API key testnet gratis di masing-masing exchange, lalu:
+
+```bash
+export BYBIT_KEY="..."
+export BYBIT_SECRET="..."
+python -m scalping BTCUSDT -e bybit --margin 50 --lev 10 testnet
+```
+
+### Live (uang asli) ⚠️
+
+```bash
+export BINANCE_LIVE_KEY="..."
+export BINANCE_LIVE_SECRET="..."
+python -m scalping BTCUSDT --margin 100 --lev 10 isolated live --i-understand
+```
+
+> ⚠️ **Peringatan:** mode live memakai **uang sungguhan**.
+> Tools selalu menampilkan banner merah + cek saldo dulu sebelum order.
+> Mulai dari margin kecil. Jangan pernah pakai uang yang tidak siap hilang.
+
+---
+
+## 🔑 API Key per Exchange
+
+API key **hanya** via environment variable — tidak pernah ditulis di file/kode.
+
+| Exchange | Environment variable |
+|---|---|
+| binance | `BINANCE_TESTNET_KEY` + `BINANCE_TESTNET_SECRET` (testnet), `BINANCE_LIVE_KEY` + `BINANCE_LIVE_SECRET` (live) |
+| okx | `OKX_KEY`, `OKX_SECRET`, `OKX_PASSPHRASE` (tambah `OKX_DEMO=1` untuk demo) |
+| bybit | `BYBIT_KEY`, `BYBIT_SECRET` |
+| bitget | `BITGET_KEY`, `BITGET_SECRET`, `BITGET_PASSPHRASE` (live only — tidak ada testnet) |
+
+---
+
+## ❓ FAQ
+
+**Q: Kenapa paper-ku lose terus?**
+A: Mode default eksekusi **bergantian buta** (LONG → SHORT → LONG) tanpa melihat sinyal pasar.
+Itu memang untuk eksekusi cepat, bukan strategi profit. Pakai `scan.py` untuk pilih coin
+yang sedang aktif, dan pertimbangkan hasil paper sebagai data — bukan janji profit.
+
+**Q: Berapa fee-nya?**
+A: Taker 0.05% per sisi (0.1% per round-trip). Dihitung otomatis di paper supaya realistis.
+
+**Q: Bisa ganti TP/SL?**
+A: Saat ini TP = 1.5× ATR, SL = 1× ATR, time-stop 15 menit (otomatis dari volatilitas coin).
+
+**Q: Data harga dari mana?**
+A: Langsung dari API publik masing-masing exchange (klines 1m/15m). Tanpa API key untuk data.
+
+---
+
+## ⚖️ Disclaimer
+
+Tools ini untuk edukasi dan eksperimen. Trading futures ber-leverage **berisiko tinggi** —
+kamu bisa kehilangan seluruh margin dalam hitungan menit. Penulis tidak bertanggung jawab
+atas kerugian apa pun. DYOR. Mulai dari paper & testnet.
+
+© 2026 aziz-sudrajat — All rights reserved.

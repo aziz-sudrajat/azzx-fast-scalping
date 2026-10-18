@@ -30,7 +30,7 @@ from . import config as cfg_mod
 from .risk import RiskGuard
 from .live_loop import (AlternatingTrader, _build_broker, _build_data,
                         _now_wib, fmt_price, paint)
-from .exchanges import SUPPORTED, get_exchange
+from .exchanges import get_exchange
 
 
 def parse_args(args: list[str]) -> dict:
@@ -144,6 +144,8 @@ def main(argv=None) -> int:
             price = float(kl[-1]["close"])
     except Exception as e:
         raise SystemExit(f"harga {symbol} gagal diambil (fail-closed): {e}")
+    if not price or price <= 0:
+        raise SystemExit(f"harga {symbol} kosong (fail-closed)")
     notional = args["margin"] * args["lev"]
     qty = notional / price
     print(f"[{_now_wib()}] {symbol} @ {fmt_price(price)} | margin {args['margin']} USDT "

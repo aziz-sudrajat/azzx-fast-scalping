@@ -32,7 +32,6 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from . import config as cfg_mod
-from .data import BinanceData
 from . import indicators as ind
 from .broker import PaperBroker
 from .exchanges import get_exchange
@@ -275,7 +274,7 @@ def _build_data(mode: str, exchange: str = "binance"):
 def main(argv=None) -> int:
     args = list(argv or sys.argv[1:])
     symbol, mode, qty = "BTCUSDT", None, 0.001
-    max_trades, i_understand = 0, False
+    max_trades, i_understand, exchange = 0, False, "binance"
     it = iter(args)
     for a in it:
         if a == "--mode":
@@ -284,6 +283,8 @@ def main(argv=None) -> int:
             qty = float(next(it, "0.001"))
         elif a == "--max-trades":
             max_trades = int(next(it, "0"))
+        elif a in ("-e", "--exchange"):
+            exchange = next(it, "binance").lower()
         elif a == "--i-understand":
             i_understand = True
         elif not a.startswith("-"):
@@ -299,8 +300,8 @@ def main(argv=None) -> int:
     if mode == "live" and not i_understand:
         raise SystemExit("mode live butuh flag --i-understand. Uang asli, sayang — pikir dua kali.")
 
-    broker = _build_broker(mode)
-    data = BinanceData(testnet=(mode == "testnet"))
+    broker = _build_broker(mode, exchange)
+    data = _build_data(mode, exchange)
     risk = RiskGuard()
     trader = AlternatingTrader(broker, data, cfg, risk)
     try:

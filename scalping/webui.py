@@ -27,9 +27,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from .live_loop import AlternatingTrader, _build_broker, _now_wib
+from .live_loop import (AlternatingTrader, _build_broker, _build_data,
+                        _now_wib, fmt_price)
 from . import config as cfg_mod
-from .data import BinanceData
 from .risk import RiskGuard
 
 _state = {
@@ -37,6 +37,7 @@ _state = {
     "thread": None,
     "running": False,
     "mode": "paper",
+    "exchange": "binance",
     "symbol": "BTCUSDT",
     "qty": 0.001,
     "events": queue.Queue(),
@@ -50,8 +51,8 @@ def _emit(ev: dict):
     ev.setdefault("ts", _now_wib())
     _state["events"].put(ev)
     if ev.get("type") == "trade_close":
-        line = (f"{ev['time']} | {ev['side']} | Entry: {ev['entry']:.2f} | "
-                f"TP: {ev['tp']:.2f} | PnL: {ev['pnl']:+.2f} [{ev['why']}]")
+        line = (f"{ev['time']} | {ev['side']} | Entry: {fmt_price(ev['entry'])} | "
+                f"TP: {fmt_price(ev['tp'])} | PnL: {ev['pnl']:+.2f} [{ev['why']}]")
         _state["log"].append(line)
         _state["log"] = _state["log"][-200:]
     if ev.get("type") == "tick":
@@ -75,10 +76,8 @@ h1{font-size:16px}
 main{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px;max-width:1200px;margin:0 auto}
 .card{background:#0d1117;border:1px solid #1c2333;border-radius:10px;padding:14px}
 .card h2{font-size:12px;color:#8b949e;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px}
-#price{font-size:34px;font-weight:700}
-#price.up{color:#3fb950}#price.dn{color:#f85149}
-#pnl{font-size:28px;font-weight:700}
-#pnl.pos{color:#3fb950}#pnl.neg{color:#f85149}
+
+
 .row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #1c2333;font-size:13px}
 .row:last-child{border:none}
 #log{background:#010409;border:1px solid #1c2333;border-radius:10px;padding:12px;height:380px;overflow-y:auto;font-size:12.5px;line-height:1.7;grid-column:1/-1}
@@ -114,6 +113,7 @@ label{font-size:12px;color:#8b949e}
 <label>Symbol <input id="symbol" value="BTCUSDT" size="10"></label>
 <label>Qty <input id="qty" value="0.001" size="7"></label>
 <label>Mode <select id="mode"><option value="paper">paper</option><option value="testnet">testnet</option></select></label>
+<label>Exch <select id="exchange"><option value="binance">binance</option><option value="okx">okx</option><option value="bybit">bybit</option><option value="bitget">bitget</option></select></label>
 </div>
 <div class="controls">
 <button class="go" id="bstart" onclick="ctl('start')">▶ Start</button>
@@ -153,7 +153,7 @@ es.onmessage=e=>{const d=JSON.parse(e.data);
 };
 function setLive(on){document.getElementById('livedot').className='dot'+(on?'':' off');}
 function setStatus(t){document.getElementById('status').textContent=t;}
-function ctl(a){const q=`/api/${a}?symbol=${document.getElementById('symbol').value}&qty=${document.getElementById('qty').value}&mode=${document.getElementById('mode').value}`;
+function ctl(a){const q=`/api/${a}?symbol=${document.getElementById('symbol').value}&qty=${document.getElementById('qty').value}&mode=${document.getElementById('mode').value}&exchange=${document.getElementById('exchange').value}`;
  fetch(q,{method:'POST'}).then(r=>r.json()).then(d=>{setStatus(d.msg||a);
   const b=document.getElementById('modebadge');b.textContent=d.mode||'paper';b.className='badge '+(d.mode||'paper');
   document.getElementById('modetxt').textContent=d.mode||'paper';});}
@@ -176,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _start_trader(self, symbol, qty, mode):
+    def _start_trader(self, symbol, qty, mode, exchange="binance"):
         if _state["running"]:
             return {"ok": False, "msg": "sudah berjalan", "mode": _state["mode"]}
         if mode == "live":
@@ -184,12 +184,13 @@ class Handler(BaseHTTPRequestHandler):
                     "mode": mode}
         cfg = cfg_mod.load()
         cfg["MODE"] = mode
-        broker = _build_broker(mode)  # SystemExit jika key kurang
-        data = BinanceData(testnet=(mode == "testnet"))
+        exchange = _state.get("exchange", "binance")
+        broker = _build_broker(mode, exchange)  # SystemExit jika key kurang
+        data = _build_data(mode, exchange)
         risk = RiskGuard()
         trader = AlternatingTrader(broker, data, cfg, risk, on_event=_emit)
         _state.update(trader=trader, running=True, mode=mode,
-                      symbol=symbol, qty=qty)
+                      symbol=symbol, qty=qty, exchange=exchange)
         t = threading.Thread(target=_run_trader,
                              args=(trader, symbol, qty), daemon=True)
         _state["thread"] = t
@@ -235,7 +236,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 r = self._start_trader(g("symbol", "BTCUSDT").upper(),
                                        float(g("qty", "0.001") or "0.001"),
-                                       g("mode", "paper"))
+                                       g("mode", "paper"),
+                                       g("exchange", "binance"))
                 self._json(r)
             except SystemExit as e:
                 self._json({"ok": False, "msg": str(e)}, 400)

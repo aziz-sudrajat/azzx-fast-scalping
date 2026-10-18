@@ -99,8 +99,6 @@ def analyze(symbol: str) -> dict | None:
         return None
     if len(kl) < 30:
         return None
-    highs = [k["high"] for k in kl]
-    lows = [k["low"] for k in kl]
     closes = [k["close"] for k in kl]
     vols = [k["volume"] for k in kl]
 

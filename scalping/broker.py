@@ -194,11 +194,13 @@ class BinanceBroker:
         quantity = float(quantity)
         if quantity <= 0:
             raise ValueError("quantity harus > 0")
+        # format desimal polos: repr() bisa hasilkan '1e-05' yang ditolak API
+        qty_str = f"{quantity:.8f}".rstrip("0").rstrip(".")
         params = {
             "symbol": symbol,
             "side": side,
             "type": "MARKET",
-            "quantity": repr(quantity),
+            "quantity": qty_str,
         }
         data = self._request("POST", "/fapi/v1/order", params, signed=True)
         if not isinstance(data, dict) or "orderId" not in data:
