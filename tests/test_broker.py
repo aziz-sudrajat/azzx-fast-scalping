@@ -1,3 +1,10 @@
+# Copyright (c) 2026 aziz-sudrajat <azizsudrajat.stb4@gmail.com>
+# https://github.com/aziz-sudrajat
+#
+# All rights reserved. This file is part of the azzx-fast-scalping project.
+# Unauthorized copying, modification, distribution, or false claim of
+# authorship is prohibited.
+
 """Test broker.py: PaperBroker & BinanceBroker.
 
 Tidak ada network asli: urlopen di-mock; signature diverifikasi manual via hmac.

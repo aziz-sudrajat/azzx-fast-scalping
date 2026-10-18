@@ -1,3 +1,10 @@
+# Copyright (c) 2026 aziz-sudrajat <azizsudrajat.stb4@gmail.com>
+# https://github.com/aziz-sudrajat
+#
+# All rights reserved. This file is part of the azzx-fast-scalping project.
+# Unauthorized copying, modification, distribution, or false claim of
+# authorship is prohibited.
+
 """Indikator teknikal murni stdlib (tanpa numpy).
 
 Semua fungsi adalah fungsi murni: tidak ada I/O, tidak ada state global.

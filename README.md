@@ -4,6 +4,8 @@ Tools scalping cepat untuk **Binance futures** dengan analisis multi-timeframe (
 
 100% Python stdlib — tanpa dependensi eksternal.
 
+![Demo](assets/demo.gif)
+
 ## Instalasi
 
 ```bash

@@ -1,3 +1,10 @@
+# Copyright (c) 2026 aziz-sudrajat <azizsudrajat.stb4@gmail.com>
+# https://github.com/aziz-sudrajat
+#
+# All rights reserved. This file is part of the azzx-fast-scalping project.
+# Unauthorized copying, modification, distribution, or false claim of
+# authorship is prohibited.
+
 """Signal engine scalping MTF (1m / 5m / 15m).
 
 Fail-closed: data kurang / kondisi tak terpenuhi -> evaluate() mengembalikan None.
