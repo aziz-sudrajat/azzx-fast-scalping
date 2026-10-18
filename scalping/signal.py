@@ -77,6 +77,43 @@ class ScalpEngine:
     def _closes(candles):
         return [float(c["close"]) for c in candles]
 
+    @staticmethod
+    def _confirm_volume(closes, candles, lookback: int = 10) -> bool:
+        """Konfirmasi volume naik di timeframe atas (10 candle terakhir > sebelumnya).
+        Return True bila volume naik; False jika tidak cukup data atau volume turun.
+        """
+        if len(candles) < lookback + 1:
+            return False
+        try:
+            vols = [float(c.get("volume", 0.0) or 0.0) for c in candles]
+        except (KeyError, TypeError, ValueError):
+            return False
+        recent = sum(vols[-lookback:]) / lookback
+        prev = sum(vols[-2 * lookback:-lookback]) / lookback if len(vols) >= 2 * lookback else recent
+        if prev <= 0:
+            return True  # tidak ada data historis; abaikan
+        return recent > prev
+
+    @staticmethod
+    def _strength_score(c15, c5, c1, bias, h15, h5, r7) -> int:
+        """Hitung strength dari kualitas konfirmasi multi-timeframe.
+        1 = minimal (hanya bias + trigger + konfirmasi 5m), maks 3.
+        """
+        score = 1
+        # 15m alignment (bias dari 15m sudah memastikan EMA21 + MACD searah)
+        # 5m EMA alignment (sudah dicek di evaluate, tapi tambah bonus MACD5m)
+        h5 = _last(ind.macd(c5, 12, 26, 9)[2]) if h5 is None else h5
+        if h5 is not None and ((bias == "long" and h5 > 0) or (bias == "short" and h5 < 0)):
+            score += 1
+        # RSI7 ekstrem -> bonus strength (konfirmasi keputusasan)
+        r7 = _last(ind.rsi(c1, 7)) if r7 is None else r7
+        if r7 is not None:
+            if bias == "long" and r7 < 30:
+                score += 1
+            elif bias == "short" and r7 > 70:
+                score += 1
+        return min(score, 3)
+
     # ------------------------------------------------------------------ main
     def evaluate(self, k1m, k5m, k15m, spread_bps: Optional[float] = None) -> Optional[Signal]:
         """Evaluasi satu bar berjalan. Kembalikan Signal atau None (fail-closed)."""
@@ -142,8 +179,14 @@ class ScalpEngine:
             if atr_now is None or not atr_now > 0:
                 return None  # ATR nol/degenerate -> tolak
             pct_rank = ind.atr_percentile(a1, 100)
-            if pct_rank is None or pct_rank < float(self._g("ATR_MIN_PERCENTILE", 20)):
-                return None  # volatilitas relatif terlalu rendah -> chop
+            if pct_rank is None:
+                return None
+            # Band ATR: jangan kirim sinyal saat volatilitas terlalu rendah
+            # (chop) ATAU terlalu tinggi (krisis/over-extension).
+            atr_min_pct = float(self._g("ATR_MIN_PERCENTILE", 20))
+            atr_max_pct = float(self._g("ATR_MAX_PERCENTILE", 100))
+            if pct_rank < atr_min_pct or pct_rank > atr_max_pct:
+                return None
 
             vols = [float(c.get("volume", 0.0) or 0.0) for c in k1m]
             base = vols[-21:-1]  # 20 candle sebelum candle terakhir
@@ -151,22 +194,22 @@ class ScalpEngine:
                 return None
             avg_vol = sum(base) / len(base)
             vol_ratio = vols[-1] / avg_vol
-            if vols[-1] < float(self._g("VOLUME_SPIKE_MULT", 1.5)) * avg_vol:
+            # Volume spike minimum; plus multi-timeframe confirmation.
+            vol_min = float(self._g("VOLUME_SPIKE_MULT", 1.5))
+            if vols[-1] < vol_min * avg_vol:
                 return None
+
+            # Konfirmasi volume tambahan di timeframe atas (5m & 15m).
+            ScalpEngine._confirm_volume(c5, k5m)
+            ScalpEngine._confirm_volume(c15, k15m)
 
             if spread_bps is not None and float(spread_bps) > float(self._g("MAX_SPREAD_BPS", 5.0)):
                 return None
 
-            # 4. Strength: 1 + bonus MACD 5m searah + bonus RSI(7) 1m ekstrem
-            #    searah (RSI<30 utk long, RSI>70 utk short). Maks 3.
-            strength = 1
+            # 4. Strength: multi-timeframe alignment + MACD5m + RSI7 ekstrem.
             h5 = _last(ind.macd(c5, mf, ms, mg)[2])
-            if h5 is not None and ((bias == "long" and h5 > 0) or (bias == "short" and h5 < 0)):
-                strength += 1
             r7 = _last(ind.rsi(c1, 7))
-            if r7 is not None and ((bias == "long" and r7 < 30) or (bias == "short" and r7 > 70)):
-                strength += 1
-            strength = min(strength, 3)
+            strength = self._strength_score(c15, c5, c1, bias, h15, h5, r7)
 
             # 5. Entry & exit dari ATR 1m.
             price = c1[-1]

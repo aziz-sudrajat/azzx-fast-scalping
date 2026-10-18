@@ -30,9 +30,13 @@ from .live_loop import fmt_price, paint
 
 BASE_URL = "https://fapi.binance.com"
 
+# Exchange URLs (fallback: OKX)
+BASE_URL_BINANCE = "https://fapi.binance.com"
+BASE_URL_OKX = "https://www.okx.com"
+
+# Symbol exclusions (shared)
 _EXCLUDE_QUOTES = ("USDC", "FDUSD", "TUSD", "DAI", "EUR", "BRL")
 _EXCLUDE_SUFFIX = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
-# base stablecoin / komoditas yang lolos filter quote (R6-Azz)
 _EXCLUDE_BASE = ("USDD", "USDJ", "XAUT", "PAXG", "BFUSD")
 
 
@@ -42,14 +46,31 @@ def _http_get(url: str, timeout: int = 15):
         return json.loads(resp.read().decode("utf-8"))
 
 
+# ----------------------------------------------------------------------
+# OKX ticker & klines (fallback when Binance is blocked)
+# ----------------------------------------------------------------------
+
+def _norm_okx_symbol(symbol: str) -> str:
+    """OKX symbol 'BTC-USDT-SWAP' -> 'BTCUSDT' (for internal use).
+    OKX format: base-USDT-SWAP. Remove dash & suffix.
+    """
+    s = symbol.upper().replace("-", "").replace("_", "")
+    # Remove swap suffix: BTCUSDT-SWAP -> BTCUSDT
+    if s.endswith("-SWAP"):
+        s = s[:-5]
+    elif s.endswith("SWAP"):
+        s = s[:-4]
+    return s
+
+
 def fetch_tickers() -> list[dict]:
-    """Semua ticker futures. Fail-closed: error -> SystemExit."""
+    """Semua ticker futures (Binance). Fail-closed: error -> SystemExit."""
     try:
-        data = _http_get(f"{BASE_URL}/fapi/v1/ticker/24hr")
+        data = _http_get(f"{BASE_URL_BINANCE}/fapi/v1/ticker/24hr")
     except Exception as e:
-        raise SystemExit(f"scan gagal ambil ticker: {e}")
+        raise SystemExit(f"scan gagal ambil ticker Binance: {e}")
     if not isinstance(data, list):
-        raise SystemExit("respons ticker tak dikenal")
+        raise SystemExit("respons ticker Binance tak dikenal")
     return data
 
 
@@ -67,9 +88,10 @@ def pick_candidates(tickers: list[dict], min_quote_vol: float,
         if base in _EXCLUDE_QUOTES or base in _EXCLUDE_BASE:
             continue
         try:
-            qv = float(t.get("quoteVolume", "0"))
-            pc = float(t.get("priceChangePercent", "0"))
-            last = float(t.get("lastPrice", "0"))
+            # Support both Binance & OKX key formats
+            qv = float(t.get("quoteVolume", t.get("quote_vol", "0")))
+            pc = float(t.get("priceChangePercent", t.get("change_pct", "0")))
+            last = float(t.get("lastPrice", t.get("price", "0")))
         except (TypeError, ValueError):
             continue
         if qv < min_quote_vol or last <= 0:
@@ -81,7 +103,8 @@ def pick_candidates(tickers: list[dict], min_quote_vol: float,
 
 
 def fetch_klines_15m(symbol: str, limit: int = 100) -> list[dict]:
-    url = (f"{BASE_URL}/fapi/v1/klines?symbol={symbol}"
+    """Fetch 15m klines (Binance)."""
+    url = (f"{BASE_URL_BINANCE}/fapi/v1/klines?symbol={symbol}"
            f"&interval=15m&limit={limit}")
     raw = _http_get(url)
     out = []
@@ -93,10 +116,122 @@ def fetch_klines_15m(symbol: str, limit: int = 100) -> list[dict]:
     return out[:-1]  # buang candle berjalan
 
 
+def _klines_impl(symbol: str, limit: int = 100) -> list[dict]:
+    """Internal klines fetcher: Binance first, then OKX fallback."""
+    # Try Binance first
+    try:
+        url = (f"{BASE_URL_BINANCE}/fapi/v1/klines?symbol={symbol}"
+               f"&interval=15m&limit={limit}")
+        raw = _http_get(url)
+        out = []
+        for row in raw:
+            out.append({"open_time": row[0], "open": float(row[1]),
+                        "high": float(row[2]), "low": float(row[3]),
+                        "close": float(row[4]), "volume": float(row[5]),
+                        "close_time": row[6]})
+        return out[:-1]
+    except Exception:
+        pass
+    # Fallback to OKX
+    try:
+        inst = _inst_id_okx(symbol)  # BTCUSDT -> BTC-USDT-SWAP
+        url = (f"{BASE_URL_OKX}/api/v5/market/candles"
+               f"?instId={inst}&bar=15m&limit={limit}")
+        raw = _http_get(url)
+        rows = raw.get("data", []) if isinstance(raw, dict) else []
+        if not rows:
+            raise RuntimeError(f"tidak ada candle OKX untuk {symbol}")
+        out = []
+        for r in rows:
+            out.append({"open_time": int(r[0]), "open": float(r[1]),
+                        "high": float(r[2]), "low": float(r[3]),
+                        "close": float(r[4]), "volume": float(r[5]),
+                        "close_time": int(r[0]) + 900000})
+        return out[:-1]
+    except Exception as e:
+        raise RuntimeError(f"klines gagal untuk {symbol}: {e}")
+
+
+def _inst_id_okx(symbol: str) -> str:
+    """BTCUSDT -> 'BTC-USDT-SWAP'."""
+    s = symbol.upper().replace("-", "").replace("_", "")
+    if s.endswith("USDT"):
+        base = s[:-4]
+        return f"{base}-USDT-SWAP"
+    return f"{s}-USDT-SWAP"
+
+
+def fetch_tickers_okx() -> list[dict]:
+    """Fetch all USDT perpetual tickers from OKX. Fail-closed: error -> SystemExit."""
+    try:
+        data = _http_get(f"{BASE_URL_OKX}/api/v5/market/tickers?instType=SWAP",
+                         timeout=15)
+    except Exception as e:
+        raise SystemExit(f"scan gagal ambil ticker OKX: {e}")
+
+    if not isinstance(data, dict):
+        raise SystemExit("respons ticker OKX tak dikenal")
+
+    rows = data.get("data", [])
+    if not rows:
+        raise SystemExit("tidak ada data ticker OKX")
+
+    out = []
+    for t in rows:
+        sym = t.get("instId", "")
+        # normalize OKX symbol to internal format (BTC-USDT-SWAP -> BTCUSDT)
+        sym = _norm_okx_symbol(sym)
+        if not sym.endswith("USDT"):
+            continue
+        if sym.endswith(_EXCLUDE_SUFFIX):
+            continue
+        base = sym[:-4]
+        if base in _EXCLUDE_QUOTES or base in _EXCLUDE_BASE:
+            continue
+        try:
+            # OKX: last = last price, open24h = open 24h ago
+            # compute 24h change % from these for reliability
+            last = float(t.get("last", "0"))
+            open24h = float(t.get("open24h", "0"))
+            chg = (last - open24h) / open24h * 100.0 if open24h > 0 else 0.0
+            # vol24h = 24h volume (base currency), quote_volume = vol24h * last
+            qv = float(t.get("vol24h", "0")) * last
+        except (TypeError, ValueError):
+            continue
+        if qv <= 0 or last <= 0:
+            continue
+        out.append({"symbol": sym, "quote_vol": qv, "change_pct": chg,
+                    "price": last})
+    out.sort(key=lambda r: r["quote_vol"], reverse=True)
+    return out
+    return out
+
+
+def fetch_klines_15m_okx(symbol: str, limit: int = 100) -> list[dict]:
+    """Fetch 15m klines dari OKX."""
+    inst = _inst_id_okx(symbol)
+    try:
+        raw = _http_get(f"{BASE_URL_OKX}/api/v5/market/candles",
+                        timeout=15)
+    except Exception:
+        raise RuntimeError(f"OKX klines gagal untuk {symbol}")
+    rows = raw.get("data", []) if isinstance(raw, dict) else []
+    if not rows:
+        raise RuntimeError(f"tidak ada candle OKX untuk {symbol}")
+
+    out = []
+    for r in rows:
+        out.append({"open_time": int(r[0]), "open": float(r[1]),
+                    "high": float(r[2]), "low": float(r[3]),
+                    "close": float(r[4]), "volume": float(r[5]),
+                    "close_time": int(r[0]) + 900000})
+    return out[:-1]
+
+
 def analyze(symbol: str) -> dict | None:
     """Hitung metrik scalping untuk satu symbol. None bila data kurang."""
     try:
-        kl = fetch_klines_15m(symbol)
+        kl = _klines_impl(symbol)
     except Exception:
         return None
     if len(kl) < 30:
@@ -153,8 +288,23 @@ def _fmt_vol(qv: float) -> str:
 
 def scan(top_n: int = 20, min_vol: float = 5_000_000.0,
          analyze_limit: int = 40, quiet: bool = False) -> list[dict]:
-    """Scan penuh. Return list ranking (skor desc)."""
-    tickers = fetch_tickers()
+    """Scan penuh. Return list ranking (skor desc).
+
+    Sumber data: Binance dulu, fallback ke OKX bila Binance di-block.
+    """
+    # Ambil ticker: Binance dulu, fallback ke OKX
+    tickers = None
+    try:
+        tickers = fetch_tickers()  # Binance
+    except SystemExit as e:
+        print(f"  ⬇️ Binance block: {e}", flush=True)
+        try:
+            tickers = fetch_tickers_okx()  # OKX fallback
+            if not quiet:
+                print(f"  🔄 menggunakan OKX data", flush=True)
+        except SystemExit as e2:
+            raise SystemExit(f"scan gagal: Binance & OKX keduanya gagal: {e2}")
+
     cands = pick_candidates(tickers, min_vol, analyze_limit)
     if not quiet:
         print(f"menganalisis {len(cands)} coin teratas by volume...", flush=True)

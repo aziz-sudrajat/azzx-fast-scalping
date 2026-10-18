@@ -53,17 +53,18 @@ SL_ATR_MULT = 1.0
 TIME_STOP_MIN = 15
 
 # ---------------------------------------------------------------------------
-# Biaya & risiko
+# Risk & quality
 # ---------------------------------------------------------------------------
 TAKER_FEE = 0.0005
 SLIPPAGE = 0.0001
 MAX_DAILY_LOSS_USD = 100.0
 MAX_POSITIONS = 3
 COOLDOWN_SEC = 300
-
-# ---------------------------------------------------------------------------
-# Konektivitas
-# ---------------------------------------------------------------------------
+ATR_MIN_PERCENTILE = 20
+ATR_MAX_PERCENTILE = 100   # batas atas ATR percentile; nonaktif jika 100
+VOLUME_SPIKE_MULT = 1.5
+MIN_CANDLE_RANGE_PCT = 0.05  # minimal range candle 1m (persen) untuk hindari chop
+MAX_SPREAD_BPS = 5.0
 BINANCE_FAPI = "https://fapi.binance.com"
 BINANCE_TESTNET = "https://testnet.binancefuture.com"
 KLINES_LIMIT = 200
@@ -85,7 +86,9 @@ _DEFAULT_KEYS = (
     "MACD_SIGNAL",
     "ATR_PERIOD",
     "ATR_MIN_PERCENTILE",
+    "ATR_MAX_PERCENTILE",
     "VOLUME_SPIKE_MULT",
+    "MIN_CANDLE_RANGE_PCT",
     "MAX_SPREAD_BPS",
     "TP_ATR_MULT",
     "SL_ATR_MULT",
@@ -224,7 +227,9 @@ def validate(cfg: dict[str, Any]) -> dict[str, Any]:
 
     _num("ATR_PERIOD", lo=1)
     _num("ATR_MIN_PERCENTILE", lo=0, hi=100)
+    _num("ATR_MAX_PERCENTILE", lo=0, hi=100)
     _num("VOLUME_SPIKE_MULT", lo=0, strict_gt=True)
+    _num("MIN_CANDLE_RANGE_PCT", lo=0, hi=10)
     _num("MAX_SPREAD_BPS", lo=0)
     _num("TP_ATR_MULT", lo=0, strict_gt=True)
     _num("SL_ATR_MULT", lo=0, strict_gt=True)
