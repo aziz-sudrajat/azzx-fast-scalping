@@ -38,7 +38,7 @@ def parse_args(args: list[str]) -> dict:
     (isolated, paper, HBARUSDT) seperti contoh user."""
     out = {"symbol": "BTCUSDT", "margin": 100.0, "lev": 10,
            "mode": None, "margin_mode": "isolated", "exchange": "binance",
-           "max_trades": 0, "i_understand": False}
+           "max_trades": 0, "i_understand": False, "strategy": "signal"}
     pos = []
     it = iter(args)
     for a in it:
@@ -56,6 +56,11 @@ def parse_args(args: list[str]) -> dict:
             out["exchange"] = next(it, "binance").lower()
         elif a == "--i-understand":
             out["i_understand"] = True
+        elif a == "--strategy":
+            strat = next(it, "signal").lower()
+            if strat not in ("signal", "alternating"):
+                raise ValueError("--strategy harus signal|alternating")
+            out["strategy"] = strat
         elif a.startswith("-"):
             raise ValueError(f"flag tak dikenal: {a}")
         else:
@@ -174,7 +179,16 @@ def main(argv=None) -> int:
         max_positions=int(cfg.get("MAX_POSITIONS", 1)),
         cooldown_sec=float(cfg.get("COOLDOWN_SEC", 300.0)),
     )
-    trader = AlternatingTrader(broker, data, cfg, risk)
+    strategy = args.get("strategy", "signal")
+    if strategy == "signal":
+        from .signal_loop import SignalTrader
+        trader = SignalTrader(broker, data, cfg_mod, risk)
+        print(f"[{_now_wib()}] strategi: SIGNAL (fleksibel, ikut arah sinyal)",
+              flush=True)
+    else:
+        trader = AlternatingTrader(broker, data, cfg, risk)
+        print(f"[{_now_wib()}] strategi: ALTERNATING (paksa gantian long/short)",
+              flush=True)
     try:
         trader.run(symbol, qty, max_trades=args["max_trades"])
     except KeyboardInterrupt:
