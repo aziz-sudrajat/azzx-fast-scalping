@@ -40,6 +40,29 @@ def _fmt_pnl(pnl: float) -> str:
     return f"{pnl:+.2f}"
 
 
+def fmt_price(px: float) -> str:
+    """Format harga dengan desimal adaptif berdasar magnitud.
+
+    BTC 81225.9 -> '81225.90'; HBAR 0.085234 -> '0.085234'.
+    Jangan pernah tampilkan 0.09 untuk harga 0.085xxx.
+    """
+    px = float(px)
+    a = abs(px)
+    if a >= 1000:
+        return f"{px:.2f}"
+    if a >= 100:
+        return f"{px:.2f}"
+    if a >= 10:
+        return f"{px:.3f}"
+    if a >= 1:
+        return f"{px:.4f}"
+    if a >= 0.1:
+        return f"{px:.5f}"
+    if a >= 0.01:
+        return f"{px:.6f}"
+    return f"{px:.8f}"
+
+
 class AlternatingTrader:
     """Eksekutor alternating LONG/SHORT dengan TP/SL/time-stop."""
 
@@ -140,8 +163,8 @@ class AlternatingTrader:
                     continue
             self._emit(type="trade_open", side=label, entry=entry, tp=tp,
                        sl=sl, time=_now_wib())
-            print(f"[{_now_wib()}] OPEN {label} {symbol} @ {entry:.2f} "
-                  f"(TP {tp:.2f} / SL {sl:.2f})", flush=True)
+            print(f"[{_now_wib()}] OPEN {label} {symbol} @ {fmt_price(entry)} "
+                  f"(TP {fmt_price(tp)} / SL {fmt_price(sl)})", flush=True)
 
             # --- monitor ---
             exit_price, exit_why = entry, "time-stop"
@@ -195,8 +218,8 @@ class AlternatingTrader:
                 self.wins += 1
             self.risk.record_trade(pnl)
 
-            line = (f"{_now_wib()} | {label} | Entry: {entry:.2f} | "
-                    f"TP: {tp:.2f} | PnL: {_fmt_pnl(pnl)} [{exit_why}]")
+            line = (f"{_now_wib()} | {label} | Entry: {fmt_price(entry)} | "
+                    f"TP: {fmt_price(tp)} | PnL: {_fmt_pnl(pnl)} [{exit_why}]")
             print(line, flush=True)
             self._emit(type="trade_close", side=label, entry=entry, tp=tp,
                        pnl=pnl, why=exit_why, time=_now_wib(),

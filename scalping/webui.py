@@ -120,18 +120,22 @@ label{font-size:12px;color:#8b949e}
 </main>
 <script>
 const log=document.getElementById('log'),price=document.getElementById('price');
+function fp(x){x=Number(x);const a=Math.abs(x);
+ if(a>=100)return x.toFixed(2); if(a>=10)return x.toFixed(3);
+ if(a>=1)return x.toFixed(4); if(a>=0.1)return x.toFixed(5);
+ if(a>=0.01)return x.toFixed(6); return x.toFixed(8);}
 let lastPx=0;
 function addLog(html){const d=document.createElement('div');d.innerHTML=html;log.prepend(d);while(log.children.length>200)log.lastChild.remove();}
 const es=new EventSource('/api/events');
 es.onmessage=e=>{const d=JSON.parse(e.data);
- if(d.type==='tick'){const p=d.price;price.textContent=p.toFixed(2);
+ if(d.type==='tick'){const p=d.price;price.textContent=fp(p);
   price.className=p>lastPx?'up':'dn';lastPx=p;
   document.getElementById('pos').textContent=d.side;
-  document.getElementById('entry').textContent=d.entry.toFixed(2);
-  document.getElementById('tpsl').textContent=d.tp.toFixed(2)+' / '+d.sl.toFixed(2);}
- if(d.type==='trade_open'){addLog(`<span style="color:#8b949e">[${d.time}] OPEN ${d.side} @ ${d.entry.toFixed(2)}</span>`);setLive(true);}
+  document.getElementById('entry').textContent=fp(d.entry);
+  document.getElementById('tpsl').textContent=fp(d.tp)+' / '+fp(d.sl);}
+ if(d.type==='trade_open'){addLog(`<span style="color:#8b949e">[${d.time}] OPEN ${d.side} @ ${fp(d.entry)}</span>`);setLive(true);}
  if(d.type==='trade_close'){const win=d.pnl>=0;const c=win?'win':'loss';const sym=win?'▲':'▼';
-  addLog(`<div class="trow trow-${c}"><span class="${c}">${sym} ${d.time} | ${d.side} | Entry: ${d.entry.toFixed(2)} | TP: ${d.tp.toFixed(2)} | PnL: ${d.pnl>=0?'+':''}${d.pnl.toFixed(2)} [${d.why}]</span></div>`);
+  addLog(`<div class="trow trow-${c}"><span class="${c}">${sym} ${d.time} | ${d.side} | Entry: ${fp(d.entry)} | TP: ${fp(d.tp)} | PnL: ${d.pnl>=0?'+':''}${d.pnl.toFixed(2)} [${d.why}]</span></div>`);
   const pnl=document.getElementById('pnl');pnl.textContent=(d.total_pnl>=0?'+':'')+d.total_pnl.toFixed(2);
   pnl.className=d.total_pnl>=0?'pos':'neg';
   document.getElementById('ntrades').textContent=d.trades;

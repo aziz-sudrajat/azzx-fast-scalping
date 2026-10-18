@@ -20,7 +20,7 @@ from . import config as cfg_mod
 from .data import BinanceData
 from .broker import PaperBroker, BinanceBroker
 from .risk import RiskGuard
-from .live_loop import AlternatingTrader, _build_broker, _now_wib
+from .live_loop import AlternatingTrader, _build_broker, _now_wib, fmt_price
 
 
 def parse_args(args: list[str]) -> dict:
@@ -111,7 +111,7 @@ def main(argv=None) -> int:
         raise SystemExit(f"harga {symbol} gagal diambil (fail-closed): {e}")
     notional = args["margin"] * args["lev"]
     qty = notional / price
-    print(f"[{_now_wib()}] {symbol} @ {price:.4f} | margin {args['margin']} USDT "
+    print(f"[{_now_wib()}] {symbol} @ {fmt_price(price)} | margin {args['margin']} USDT "
           f"x{args['lev']} = notional {notional:.2f} USDT -> qty {qty:.6f} "
           f"| mode={mode} {args['margin_mode']}", flush=True)
 
