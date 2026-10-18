@@ -106,6 +106,7 @@ button:hover{background:#262f42}
 button.go{background:#1a7f37;border-color:#2ea043}
 button.stopb{background:#7f1d1d;border-color:#a02e2e}
 button:disabled{opacity:.4;cursor:default}
+@keyframes blink{50%{opacity:.55}}
 input,select{font-family:inherit;font-size:13px;padding:8px;border-radius:8px;border:1px solid #30363d;background:#010409;color:#e6edf3}
 label{font-size:12px;color:#8b949e}
 @media(max-width:700px){main{grid-template-columns:1fr}}
@@ -125,12 +126,14 @@ label{font-size:12px;color:#8b949e}
 <label>Margin <input id="margin" value="100" size="6"></label>
 <label>Lev <input id="lev" value="10" size="4"></label>
 <label><select id="marginmode"><option value="isolated">isolated</option><option value="cross">cross</option></select></label>
-<label>Mode <select id="mode"><option value="paper">paper</option><option value="testnet">testnet</option></select></label>
+<label>Mode <select id="mode" onchange="modeChanged()"><option value="paper">paper</option><option value="testnet">testnet</option><option value="live">live</option></select></label>
 <label>Exch <select id="exchange"><option value="binance">binance</option><option value="okx">okx</option><option value="bybit">bybit</option><option value="bitget">bitget</option></select></label>
 <label>Strategy <select id="strategy"><option value="signal">signal</option><option value="alternating">alternating</option></select></label>
 <label>MaxTr <input id="maxtrades" value="0" size="4"></label>
 </div>
 <div class="controls">
+<div id="livewarn" style="display:none;background:#7f1d1d;border:2px solid #ff5252;border-radius:8px;padding:10px;margin:8px 0;color:#fff;font-weight:bold;animation:blink 1s infinite">⚠️ MODE LIVE — UANG ASLI! Ketik <code>SAYA PAHAM</code> di bawah untuk mengaktifkan Start.</div>
+<div id="liveconfirm" style="display:none;margin:8px 0"><label>Ketik SAYA PAHAM: <input id="confirmtxt" size="14" oninput="modeChanged()"></label></div>
 <button class="go" id="bstart" onclick="ctl('start')">▶ Start</button>
 <button class="stopb" id="bstop" onclick="ctl('stop')">⏸ Stop</button>
 <button class="stopb" onclick="if(confirm('KILL-SWITCH? Hentikan semua & cegah trade baru.'))ctl('kill')">☠ Kill-switch</button>
@@ -168,8 +171,14 @@ es.onmessage=e=>{const d=JSON.parse(e.data);
 };
 function setLive(on){document.getElementById('livedot').className='dot'+(on?'':' off');}
 function setStatus(t){document.getElementById('status').textContent=t;}
+function modeChanged(){const m=document.getElementById('mode').value;
+const isLive=m==='live';
+document.getElementById('livewarn').style.display=isLive?'block':'none';
+document.getElementById('liveconfirm').style.display=isLive?'block':'none';
+const ok=!isLive||document.getElementById('confirmtxt').value==='SAYA PAHAM';
+document.getElementById('bstart').disabled=!ok;}
 function ctl(a){const gv=id=>document.getElementById(id).value;
-const q=`/api/${a}?symbol=${gv('symbol')}&margin=${gv('margin')}&lev=${gv('lev')}&marginmode=${gv('marginmode')}&mode=${gv('mode')}&exchange=${gv('exchange')}&strategy=${gv('strategy')}&maxtrades=${gv('maxtrades')}`;
+const q=`/api/${a}?symbol=${gv('symbol')}&margin=${gv('margin')}&lev=${gv('lev')}&marginmode=${gv('marginmode')}&mode=${gv('mode')}&exchange=${gv('exchange')}&strategy=${gv('strategy')}&maxtrades=${gv('maxtrades')}&confirm=${encodeURIComponent(gv('confirmtxt')||'')}`;
  fetch(q,{method:'POST'}).then(r=>r.json()).then(d=>{setStatus(d.msg||a);
   const b=document.getElementById('modebadge');b.textContent=d.mode||'paper';b.className='badge '+(d.mode||'paper');
   document.getElementById('modetxt').textContent=d.mode||'paper';});}
@@ -193,18 +202,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _start_trader(self, symbol, margin, lev, margin_mode, mode,
-                      exchange="binance", strategy="signal", max_trades=0):
+                      exchange="binance", strategy="signal", max_trades=0,
+                      confirm=""):
         if _state["running"]:
             return {"ok": False, "msg": "sudah berjalan", "mode": _state["mode"]}
-        if mode == "live":
-            return {"ok": False, "msg": "live hanya via CLI --i-understand",
+        if mode == "live" and confirm != "SAYA PAHAM":
+            return {"ok": False,
+                    "msg": "mode live butuh konfirmasi ketik SAYA PAHAM",
                     "mode": mode}
         cfg = cfg_mod.load()
         cfg["MODE"] = mode
         broker = _build_broker(mode, exchange)  # SystemExit jika key kurang
         data = _build_data(mode, exchange)
-        # set leverage & margin-type (testnet; paper di-skip aman)
-        if mode == "testnet":
+        # set leverage & margin-type (testnet/live; paper di-skip aman)
+        if mode in ("testnet", "live"):
             mt = "ISOLATED" if margin_mode == "isolated" else "CROSSED"
             try:
                 broker.set_margin_type(symbol, mt)
@@ -300,7 +311,8 @@ class Handler(BaseHTTPRequestHandler):
                     g("mode", "paper"),
                     g("exchange", "binance"),
                     g("strategy", "signal"),
-                    int(g("maxtrades", "0") or "0"))
+                    int(g("maxtrades", "0") or "0"),
+                    g("confirm", ""))
                 self._json(r)
             except SystemExit as e:
                 self._json({"ok": False, "msg": str(e)}, 400)
