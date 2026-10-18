@@ -21,3 +21,9 @@ def test_mid_range():
 
 def test_tiny():
     assert fmt_price(0.001234) == "0.00123400"
+
+
+def test_paint_no_tty():
+    from scalping.live_loop import paint, _USE_COLOR
+    # di pytest stdout bukan tty -> tanpa kode ANSI
+    assert paint("halo", "green", "bold") == "halo"

@@ -40,6 +40,26 @@ def _fmt_pnl(pnl: float) -> str:
     return f"{pnl:+.2f}"
 
 
+# --- warna terminal (ANSI) ---
+_USE_COLOR = sys.stdout.isatty()
+_C = {
+    "green": "\033[92m",   # hijau terang
+    "red": "\033[91m",     # merah terang
+    "cyan": "\033[96m",
+    "yellow": "\033[93m",
+    "dim": "\033[2m",
+    "bold": "\033[1m",
+    "reset": "\033[0m",
+}
+
+
+def paint(text: str, *colors: str) -> str:
+    """Bungkus teks dengan kode ANSI. Tanpa warna bila bukan tty."""
+    if not _USE_COLOR or not colors:
+        return text
+    return "".join(_C[c] for c in colors) + text + _C["reset"]
+
+
 def fmt_price(px: float) -> str:
     """Format harga dengan desimal adaptif berdasar magnitud.
 
@@ -120,8 +140,9 @@ class AlternatingTrader:
         time_stop = float(self._g("TIME_STOP_MIN", 15)) * 60
         fee_rate = 0.0005  # taker 0.05% per side
 
-        print(f"[{_now_wib()}] mulai alternating {symbol} "
-              f"qty={qty} mode={self._g('MODE', 'paper')}", flush=True)
+        print(paint(f"[{_now_wib()}] mulai alternating {symbol} "
+                        f"qty={qty} mode={self._g('MODE', 'paper')}",
+                        "cyan", "bold"), flush=True)
         self._emit(type="started", symbol=symbol, qty=qty)
 
         while not self._stop:
@@ -163,8 +184,10 @@ class AlternatingTrader:
                     continue
             self._emit(type="trade_open", side=label, entry=entry, tp=tp,
                        sl=sl, time=_now_wib())
-            print(f"[{_now_wib()}] OPEN {label} {symbol} @ {fmt_price(entry)} "
-                  f"(TP {fmt_price(tp)} / SL {fmt_price(sl)})", flush=True)
+            ocol = "green" if label == "LONG" else "red"
+            print(paint(f"[{_now_wib()}] OPEN {label} {symbol} @ {fmt_price(entry)} "
+                        f"(TP {fmt_price(tp)} / SL {fmt_price(sl)})",
+                        ocol, "bold"), flush=True)
 
             # --- monitor ---
             exit_price, exit_why = entry, "time-stop"
@@ -220,6 +243,7 @@ class AlternatingTrader:
 
             line = (f"{_now_wib()} | {label} | Entry: {fmt_price(entry)} | "
                     f"TP: {fmt_price(tp)} | PnL: {_fmt_pnl(pnl)} [{exit_why}]")
+            line = paint(line, "green" if pnl >= 0 else "red", "bold")
             print(line, flush=True)
             self._emit(type="trade_close", side=label, entry=entry, tp=tp,
                        pnl=pnl, why=exit_why, time=_now_wib(),
