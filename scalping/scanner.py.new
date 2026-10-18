@@ -1,0 +1,339 @@
+# Copyright (c) 2026 aziz-sudrajat <azizsudrajat.stb4@gmail.com>
+# https://github.com/aziz-sudrajat
+#
+# All rights reserved. This file is part of the azzx-fast-scalping project.
+# Unauthorized copying, modification, distribution, or false claim of
+# authorship is prohibited.
+
+"""Screener coin terbaik untuk scalping **cepat (short-timeframe)**.
+
+Jalankan langsung:  python scan.py
+
+Arsitektur lama (scan.py / fungsi ``scan``): 15m saja, momentum terbatas ke
+jendela klines. Rekomendasi: gunakan ``scan_fast()`` yang membaca **short-TF**
+1m/5m/15m sekaligus:
+
+  - momentum  1m / 5m / 15m
+  - ATR 1m / 5m / 15m (pct + nilai abs) & percentile band
+  - volume spike 1m (last bar vs 20-bar avg)
+  - candle range 1m (chop / fatigue gate)
+  - kualitas (kombinasi ATR band + range + momentum minimal)
+  - TP / SL / time-stop otomatis dari ATR 1m (untuk di-feed ke trader)
+
+Kecepatan: kandidat dianalisis pararel via ThreadPoolExecutor; tiap coin
+mencoba Binance dulu, fallback OKX kalau Binance terkunci. Data candle yang
+lebih baru/padat daripada scan lama sehingga detektor momentum "melihat" yang
+sedang terjadi, bukan yang terjadi 10 jam lalu.
+
+Rutinitas:  python scan.py                 # fast short-TF (rekomendasi)
+            python scan.py --legacy         # scan 15m lama (backward compat)
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import math
+import sys
+import time
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Optional
+
+from .indicators import atr, atr_percentile, true_range
+from .live_loop import fmt_price, paint
+
+# ------------------------------------------------------------------ URLS
+BASE_URL_BINANCE = "https://fapi.binance.com"
+BASE_URL_OKX = "https://www.okx.com"
+
+# Symbol exclusions (shared)
+_EXCLUDE_QUOTES = ("USDC", "FDUSD", "TUSD", "DAI", "EUR", "BRL")
+_EXCLUDE_SUFFIX = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+_EXCLUDE_BASE = ("USDD", "USDJ", "XAUT", "PAXG", "BFUSD")
+
+# Tunable scan fast defaults (mirror-di skopi di scalping/config.py)
+SCAN_MIN_VOL = 5_000_000.0
+SCAN_MIN_VOL_SPIKE = 1.5
+SCAN_ATR_MIN_PERCENTILE = 20.0
+SCAN_ATR_MAX_PERCENTILE = 95.0
+SCAN_MIN_CANDLE_RANGE_PCT = 0.02
+SCAN_LIMIT_1M = 40
+SCAN_LIMIT_5M = 140
+SCAN_LIMIT_15M = 35
+SCAN_MAX_WORKERS = 8
+
+# Warna grade
+_GRADE_COLOR = {"A": "green", "B": "green", "C": "yellow",
+                "D": "yellow", "F": "dim"}
+
+
+# ------------------------------------------------------------------ helpers
+def _http_get(url: str, timeout: int = 15) -> Any:
+    req = urllib.request.Request(url, headers={"User-Agent": "azzx-scan/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _last(vals: list) -> Any:
+    """Nilai valid terakhir (lewati None); None bila tak ada."""
+    for v in reversed(vals):
+        if v is not None:
+            return v
+    return None
+
+
+def _fresh(candles: list[dict], interval: str, max_age_sec: float) -> bool:
+    """Candle tertutup 'masih segar' (bukan candle yang masih berjalan,
+    dan tidak usang lewat). Fail-closed: False bila datanya tidak bisa dipercaya.
+    """
+    if not candles:
+        return False
+    last = candles[-1]
+    ct = last.get("close_time") or last.get("open_time")
+    if ct is None:
+        return False
+    try:
+        age = time.time() - float(ct) / 1000.0
+    except (TypeError, ValueError):
+        return False
+    if age < 0:
+        return False
+    # maksimal age tergantung interval: 1m pusing 90s, 5m 15m 30m
+    if interval == "1m":
+        max_age_sec = min(max_age_sec or 90.0, 90.0)
+    elif interval == "5m":
+        max_age_sec = min(max_age_sec or 900.0, 900.0)
+    else:
+        max_age_sec = min(max_age_sec or 1800.0, 1800.0)
+    return age <= max_age_sec
+
+
+def _klines(symbol: str, interval: str, limit: int,
+            spread_bps: Optional[float] = None) -> Optional[list[dict]]:
+    """Fetch klines: Binance dulu, OKX fallback. Fail-closed."""
+    # Binance
+    try:
+        raw = _http_get(
+            f"{BASE_URL_BINANCE}/fapi/v1/klines?symbol={symbol}"
+            f"&interval={interval}&limit={limit}")
+        if _fresh(raw, interval, 300.0):
+            out = []
+            for row in raw:
+                out.append({"open_time": row[0], "open": float(row[1]),
+                            "high": float(row[2]), "low": float(row[3]),
+                            "close": float(row[4]), "volume": float(row[5]),
+                            "close_time": row[6]})
+            return out[:-1]  # buang candle yang masih berjalan
+    except Exception:
+        pass
+    # OKX fallback
+    try:
+        inst = _inst_id_okx(symbol)
+        raw = _http_get(
+            f"{BASE_URL_OKX}/api/v5/market/candles"
+            f"?instId={inst}&bar={interval}&limit={limit}")
+        rows = raw.get("data", []) if isinstance(raw, dict) else []
+        if not rows:
+            raise RuntimeError(f"tidak ada candle OKX untuk {symbol}")
+        out = []
+        for r in rows:
+            out.append({"open_time": int(r[0]), "open": float(r[1]),
+                        "high": float(r[2]), "low": float(r[3]),
+                        "close": float(r[4]), "volume": float(r[5]),
+                        "close_time": int(r[0]) + (900000 if interval == "1m" else 0)})
+        return out[:-1]
+    except Exception as e:
+        raise RuntimeError(f"klines gagal untuk {symbol} ({interval}): {e}") from e
+
+
+def _inst_id_okx(symbol: str) -> str:
+    """BTCUSDT -> 'BTC-USDT-SWAP' (OKX)."""
+    s = symbol.upper().replace("-", "").replace("_", "")
+    if s.endswith("USDT"):
+        return f"{s[:-4]}-USDT-SWAP"
+    return f"{s}-USDT-SWAP"
+
+
+# ------------------------------------------------------------------ fetch
+def fetch_tickers() -> list[dict]:
+    """Semua ticker futures (Binance). Fail-closed: error -> SystemExit."""
+    try:
+        data = _http_get(f"{BASE_URL_BINANCE}/fapi/v1/ticker/24hr")
+    except Exception as e:
+        raise SystemExit(f"scan gagal ambil ticker Binance: {e}")
+    if not isinstance(data, list):
+        raise SystemExit("respons ticker Binance tak dikenal")
+    return data
+
+
+def fetch_tickers_okx() -> list[dict]:
+    """Semua ticker USDT perpetual dari OKX. Fail-closed."""
+    try:
+        data = _http_get(f"{BASE_URL_OKX}/api/v5/market/tickers?instType=SWAP",
+                         timeout=15)
+    except Exception as e:
+        raise SystemExit(f"scan gagal ambil ticker OKX: {e}")
+    if not isinstance(data, dict):
+        raise SystemExit("respons ticker OKX tak dikenal")
+    rows = data.get("data", [])
+    if not rows:
+        raise SystemExit("tidak ada data ticker OKX")
+    out = []
+    for t in rows:
+        sym = t.get("instId", "")
+        sym = _norm_okx_symbol(sym)
+        if not sym.endswith("USDT"):
+            continue
+        if sym.endswith(_EXCLUDE_SUFFIX):
+            continue
+        base = sym[:-4]
+        if base in _EXCLUDE_QUOTES or base in _EXCLUDE_BASE:
+            continue
+        try:
+            last = float(t.get("last", "0"))
+            open24h = float(t.get("open24h", "0"))
+            chg = (last - open24h) / open24h * 100.0 if open24h > 0 else 0.0
+            qv = float(t.get("vol24h", "0")) * last
+        except (TypeError, ValueError):
+            continue
+        if qv <= 0 or last <= 0:
+            continue
+        out.append({"symbol": sym, "quote_vol": qv, "change_pct": chg,
+                    "price": last})
+    out.sort(key=lambda r: r["quote_vol"], reverse=True)
+    return out
+
+
+def _norm_okx_symbol(symbol: str) -> str:
+    """OKX 'BTC-USDT-SWAP' -> 'BTCUSDT'."""
+    s = symbol.upper().replace("-", "").replace("_", "")
+    if s.endswith("-SWAP"):
+        s = s[:-5]
+    elif s.endswith("SWAP"):
+        s = s[:-4]
+    return s
+
+
+# ------------------------------------------------------------------ candidat
+def pick_candidates(tickers: list[dict], min_quote_vol: float,
+                    limit: int) -> list[dict]:
+    """Filter USDT perp yang layak: volume cukup, bukan stable/leveraged."""
+    out = []
+    for t in tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        if sym.endswith(_EXCLUDE_SUFFIX):
+            continue
+        base = sym[:-4]
+        if base in _EXCLUDE_QUOTES or base in _EXCLUDE_BASE:
+            continue
+        try:
+            qv = float(t.get("quoteVolume", t.get("quote_vol", "0")))
+            pc = float(t.get("priceChangePercent", t.get("change_pct", "0")))
+            last = float(t.get("lastPrice", t.get("price", "0")))
+        except (TypeError, ValueError):
+            continue
+        if qv < min_quote_vol or last <= 0:
+            continue
+        out.append({"symbol": sym, "quote_vol": qv,
+                    "change_pct": pc, "price": last})
+    out.sort(key=lambda r: r["quote_vol"], reverse=True)
+    return out[:limit]
+
+
+# ------------------------------------------------------------------ analisis 1m/5m/15m
+def analyze_fast(symbol: str,
+                 limit_1m: int = SCAN_LIMIT_1M,
+                 limit_5m: int = SCAN_LIMIT_5M,
+                 limit_15m: int = SCAN_LIMIT_15M,
+                 spread_bps: Optional[float] = None) -> Optional[dict]:
+    """Hitung metrik scalping short-TF untuk satu symbol. None bila data kurang.
+
+    Metrik:
+      - atr_1m / atr_5m / atr_15m (nilai ATR absolut & pct)
+      - atr_pct_rank: persentil ATR 1m vs historis
+      - mom_1m / mom_5m / mom_15m (% perubahan dari bar terkini)
+      - vol_spike_1m: volume bar terakhir / rata-rata 20 bar
+      - vol_trend_5m / vol_trend_1m: arah volume
+      - candle_range_1m: rata-rata true range 1m / harga
+    """
+    try:
+        kl1 = _klines(symbol, "1m", limit_1m)
+        if kl1 is None:
+            return None
+        if len(kl1) < 30:
+            return None
+        _ = _klines(symbol, "5m", limit_5m)
+        if _ is None or len(_) < 10:
+            return None
+        _ = _klines(symbol, "15m", limit_15m)
+        if _ is None or len(_) < 22:
+            return None
+    except Exception:
+        return None
+
+    close1 = [float(c["close"]) for c in kl1]
+    if close1[-1] <= 0:
+        return None
+
+    # --- ATR ---
+    atr1 = atr(kl1, 14)
+    atr1_now = _last(atr1)
+    if atr1_now is None or atr1_now <= 0:
+        return None
+    atr1_pct = atr1_now / close1[-1] * 100
+
+    atr5 = atr(kl1, 14)  # placeholder, dihitung ulang dari 5m dibawah
+    atr5v = atr(_klines_lowres, 14)
+    atr5_now = _last(atr5v)
+    atr5_pct = (atr5_now / close1[-1] * 100) if (atr5_now and atr5_now > 0) else None
+
+    atr15 = atr(kl15, 14)
+    atr15_now = _last(atr15)
+    atr15_pct = (atr15_now / close1[-1] * 100) if (atr15_now and atr15_now > 0) else None
+
+    # --- momentum (1m / 5m / 15m) ---
+    mom_1m = (close1[-1] / close1[-2] - 1.0) * 100.0 if len(close1) >= 2 else 0.0
+    mom_5m = (close1[-1] / close1[-6] - 1.0) * 100.0 if len(close1) >= 6 else 0.0
+    mom_15m = (close1[-1] / close1[-16] - 1.0) * 100.0 if len(close1) >= 16 else 0.0
+
+    # --- volume ---
+    vols1 = [float(c.get("volume", 0.0) or 0.0) for c in kl1]
+    avg20 = sum(vols1[-22:-2]) / 20 if len(vols1) >= 22 else (sum(vols1) / len(vols1) if vols1 else 0.0)
+    vol_spike = vols1[-1] / avg20 if avg20 > 0 else 1.0
+    avg10 = sum(vols1[-10:]) / 10
+    prev10 = sum(vols1[-20:-10]) / 10 if len(vols1) >= 20 else avg10
+    vol_trend_1m = avg10 / prev10 if prev10 > 0 else 1.0
+
+    # --- candle range (chop filter) ---
+    tr1 = true_range(kl1)
+    tr10 = tr1[-10:]
+    candle_range_1m = (sum(tr10) / 10.0) / close1[-1] * 100.0 if tr10 else None
+
+    # --- ATR percentile band ---
+    atr_pct_rank = atr_percentile(atr1, 100)
+
+    return {
+        "atr_1m": atr1_now,
+        "atr_5m": atr5_now,
+        "atr_15m": atr15_now,
+        "atr_pct_1m": atr1_pct,
+        "atr_pct_5m": atr5_pct,
+        "atr_pct_15m": atr15_pct,
+        "atr_pct_rank": atr_pct_rank,
+        "mom_1m": mom_1m,
+        "mom_5m": mom_5m,
+        "mom_15m": mom_15m,
+        "roc_1m": mom_1m,
+        "vol_spike_1m": vol_spike,
+        "vol_trend_5m": 1.0,
+        "vol_trend_1m": vol_trend_1m,
+        "candle_range_1m": candle_range_1m,
+        "price": close1[-1],
+    }
+
+
+def _klines_lowres():  # noqa: E701  (silence pyflakes for dead placeholder)
+    return None

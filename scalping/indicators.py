@@ -180,6 +180,42 @@ def atr(
     return out
 
 
+def roc(values: Sequence[float], period: int) -> list[float | None]:
+    """Rate of Change (%), (value[i] / value[i-period] - 1) * 100.
+
+    Entri sebelum ``i >= period`` adalah ``None``. Fungsi murni (tidak ada I/O).
+    """
+    _check_period(period)
+    n = len(values)
+    out: list[float | None] = [None] * n
+    if n < period + 1:
+        return out
+    for i in range(period, n):
+        out[i] = (values[i] / values[i - period] - 1.0) * 100.0
+    return out
+
+
+def true_range(candles: Sequence[Mapping[str, float]]) -> list[float]:
+    """True Range per candle: max(high-low, |high-prev_close|, |low-prev_close|).
+
+    Mengembalikan list float (tidak None). Fungsi murni.
+    """
+    out: list[float] = []
+    prev_close: float | None = None
+    for c in candles:
+        high = float(c["high"])
+        low = float(c["low"])
+        close = float(c["close"])
+        if prev_close is None:
+            tr = high - low
+        else:
+            tr = max(high - low, abs(high - prev_close),
+                     abs(low - prev_close))
+        out.append(tr)
+        prev_close = close
+    return out
+
+
 def vwap(candles: Sequence[Mapping[str, float]]) -> list[float | None]:
     """Volume-Weighted Average Price berjalan (kumulatif dari awal data).
 

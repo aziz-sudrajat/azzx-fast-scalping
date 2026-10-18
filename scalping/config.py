@@ -53,6 +53,15 @@ SL_ATR_MULT = 1.0
 TIME_STOP_MIN = 15
 
 # ---------------------------------------------------------------------------
+# Scanner (short-TF fast scan)
+# ---------------------------------------------------------------------------
+SCANNER_MIN_VOL = 5_000_000.0
+SCANNER_MIN_VOL_SPIKE = 1.5
+SCANNER_ATR_MIN_PERCENTILE = 20
+SCANNER_ATR_MAX_PERCENTILE = 95
+SCANNER_MIN_CANDLE_RANGE_PCT = 0.02
+
+# ---------------------------------------------------------------------------
 # Risk & quality
 # ---------------------------------------------------------------------------
 TAKER_FEE = 0.0005
@@ -87,6 +96,10 @@ _DEFAULT_KEYS = (
     "ATR_PERIOD",
     "ATR_MIN_PERCENTILE",
     "ATR_MAX_PERCENTILE",
+    "SCANNER_ATR_MIN_PERCENTILE",
+    "SCANNER_ATR_MAX_PERCENTILE",
+    "SCANNER_MIN_VOL_SPIKE",
+    "SCANNER_MIN_CANDLE_RANGE_PCT",
     "VOLUME_SPIKE_MULT",
     "MIN_CANDLE_RANGE_PCT",
     "MAX_SPREAD_BPS",
@@ -228,6 +241,10 @@ def validate(cfg: dict[str, Any]) -> dict[str, Any]:
     _num("ATR_PERIOD", lo=1)
     _num("ATR_MIN_PERCENTILE", lo=0, hi=100)
     _num("ATR_MAX_PERCENTILE", lo=0, hi=100)
+    _num("SCANNER_ATR_MIN_PERCENTILE", lo=0, hi=100)
+    _num("SCANNER_ATR_MAX_PERCENTILE", lo=0, hi=100)
+    _num("SCANNER_MIN_VOL_SPIKE", lo=0, strict_gt=True)
+    _num("SCANNER_MIN_CANDLE_RANGE_PCT", lo=0, hi=10)
     _num("VOLUME_SPIKE_MULT", lo=0, strict_gt=True)
     _num("MIN_CANDLE_RANGE_PCT", lo=0, hi=10)
     _num("MAX_SPREAD_BPS", lo=0)
