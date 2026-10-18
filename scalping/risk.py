@@ -19,6 +19,7 @@ Fail-closed: bila ragu, tolak (return (False, alasan)).
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone, timedelta
 
 
 class RiskGuard:
@@ -42,10 +43,25 @@ class RiskGuard:
         self._kill_reason = ""
         self._daily_pnl = 0.0
         self._last_loss_ts: float | None = None
+        self._day = self._today_wib()
+
+    @staticmethod
+    def _today_wib() -> str:
+        wib = timezone(timedelta(hours=7))
+        return datetime.now(wib).strftime("%Y-%m-%d")
+
+    def _maybe_roll_day(self) -> None:
+        """Reset otomatis bila sudah ganti hari (WIB)."""
+        today = self._today_wib()
+        if today != self._day:
+            self._day = today
+            self._daily_pnl = 0.0
+            self._last_loss_ts = None
 
     # ---- gerbang ----
     def check(self, symbol: str, open_count: int) -> tuple[bool, str]:
         """(boleh_buka?, alasan). symbol dicatat untuk konteks; aturan global."""
+        self._maybe_roll_day()
         if self._killed:
             return False, f"kill-switch aktif: {self._kill_reason or 'manual'}"
         if self._daily_pnl <= -self.max_daily_loss_usd:
@@ -65,6 +81,7 @@ class RiskGuard:
     # ---- pencatatan ----
     def record_trade(self, pnl_usd: float, ts: float | None = None) -> None:
         """Catat hasil trade tertutup. Trade loss memicu cooldown."""
+        self._maybe_roll_day()
         pnl_usd = float(pnl_usd)
         self._daily_pnl += pnl_usd
         if pnl_usd < 0:

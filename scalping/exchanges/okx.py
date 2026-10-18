@@ -106,7 +106,7 @@ class OKXExchangeBroker(LocalPositionTracker):
 
     # --- kontrak broker ---
     def market_open(self, symbol: str, side: str, qty: float,
-                    price: float) -> dict:
+                    price: float, track: bool = True) -> dict:
         side = _norm_side(side)
         inst = to_inst_id(symbol)
         td = getattr(self, "_td_mode", "isolated")
@@ -114,7 +114,8 @@ class OKXExchangeBroker(LocalPositionTracker):
             "instId": inst, "tdMode": td,
             "side": "buy" if side == "BUY" else "sell",
             "ordType": "market", "sz": f"{qty:.8f}"})
-        self._track_open(symbol, side, qty, price)
+        if track:
+            self._track_open(symbol, side, qty, price)
         return {"orderId": res["data"][0].get("ordId"), "simulated": False}
 
     def market_close(self, symbol: str, price: float) -> dict:
@@ -122,7 +123,8 @@ class OKXExchangeBroker(LocalPositionTracker):
         if pos is None:
             return {"pnl_usd": 0.0, "flat": True}
         close_side = "SELL" if pos["side"] == "BUY" else "BUY"
-        self.market_open(symbol, close_side, abs(pos["amt"]), price)
+        self.market_open(symbol, close_side, abs(pos["amt"]), price,
+                         track=False)
         return self._track_close(symbol, price)
 
     def get_position(self, symbol: str) -> dict | None:

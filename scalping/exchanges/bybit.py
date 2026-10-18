@@ -99,14 +99,15 @@ class BybitExchangeBroker(LocalPositionTracker):
 
     # --- kontrak broker ---
     def market_open(self, symbol: str, side: str, qty: float,
-                    price: float) -> dict:
+                    price: float, track: bool = True) -> dict:
         side = _norm_side(side)
         sym = norm_symbol_usdt(symbol)
         res = self._post("/v5/order/create", {
             "category": "linear", "symbol": sym,
             "side": "Buy" if side == "BUY" else "Sell",
             "orderType": "Market", "qty": f"{qty:.8f}"})
-        self._track_open(symbol, side, qty, price)
+        if track:
+            self._track_open(symbol, side, qty, price)
         return {"orderId": (res.get("result") or {}).get("orderId"),
                 "simulated": False}
 
@@ -115,7 +116,8 @@ class BybitExchangeBroker(LocalPositionTracker):
         if pos is None:
             return {"pnl_usd": 0.0, "flat": True}
         close_side = "SELL" if pos["side"] == "BUY" else "BUY"
-        self.market_open(symbol, close_side, abs(pos["amt"]), price)
+        self.market_open(symbol, close_side, abs(pos["amt"]), price,
+                         track=False)
         return self._track_close(symbol, price)
 
     def get_position(self, symbol: str) -> dict | None:
