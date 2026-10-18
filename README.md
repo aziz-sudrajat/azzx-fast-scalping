@@ -14,6 +14,26 @@ source venv/bin/activate
 pip install -r requirements.txt   # stdlib only, tidak menginstal apa pun
 ```
 
+## Multi-exchange
+
+Didukung: **binance** (default), **okx**, **bybit**, **bitget**.
+
+```bash
+python -m scalping BTCUSDT -e bybit --margin 50 --lev 10 --mode paper
+python -m scalping ETHUSDT -e okx --margin 100 --lev 5 testnet
+```
+
+API key via environment (tidak pernah di argumen / file):
+
+| Exchange | Key env |
+|---|---|
+| binance | `BINANCE_TESTNET_KEY/SECRET`, `BINANCE_LIVE_KEY/SECRET` |
+| okx | `OKX_KEY`, `OKX_SECRET`, `OKX_PASSPHRASE` (+`OKX_DEMO=1` untuk demo) |
+| bybit | `BYBIT_KEY`, `BYBIT_SECRET` |
+| bitget | `BITGET_KEY`, `BITGET_SECRET`, `BITGET_PASSPHRASE` |
+
+Tanpa `-e`, default = binance.
+
 ## Cara menjalankan
 
 Entry point: `python -m scalping.run` (rencana; modul run belum tersedia).

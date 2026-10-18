@@ -34,7 +34,8 @@ from datetime import datetime, timezone, timedelta
 from . import config as cfg_mod
 from .data import BinanceData
 from . import indicators as ind
-from .broker import PaperBroker, BinanceBroker
+from .broker import PaperBroker
+from .exchanges import get_exchange
 from .risk import RiskGuard
 
 
@@ -181,14 +182,10 @@ class AlternatingTrader:
             try:
                 self.broker.market_open(symbol, side, qty, entry)
             except Exception as e:
-                # BinanceBroker pakai place_market
-                try:
-                    self.broker.place_market(symbol, side, qty)
-                except Exception as e2:
-                    print(f"[{_now_wib()}] open gagal: {e2} — skip trade.",
-                          flush=True)
-                    time.sleep(poll_sec)
-                    continue
+                print(f"[{_now_wib()}] open gagal: {e} — skip trade.",
+                      flush=True)
+                time.sleep(poll_sec)
+                continue
             self._emit(type="trade_open", side=label, entry=entry, tp=tp,
                        sl=sl, time=_now_wib())
             ocol = "green" if label == "LONG" else "red"
@@ -225,19 +222,11 @@ class AlternatingTrader:
             try:
                 res = self.broker.market_close(symbol, exit_price)
                 pnl = float(res.get("pnl_usd", 0.0))
-            except Exception:
-                try:
-                    close_side = "SELL" if is_long else "BUY"
-                    self.broker.place_market(symbol, close_side, qty)
-                    gross = (exit_price - entry) * qty if is_long \
-                        else (entry - exit_price) * qty
-                    fees = (entry + exit_price) * qty * fee_rate
-                    pnl = gross - fees
-                except Exception as e2:
-                    print(f"[{_now_wib()}] close gagal: {e2} — DARURAT: "
-                          f"cek posisi manual!", flush=True)
-                    self._emit(type="error", error=str(e2))
-                    break
+            except Exception as e2:
+                print(f"[{_now_wib()}] close gagal: {e2} — DARURAT: "
+                      f"cek posisi manual!", flush=True)
+                self._emit(type="error", error=str(e2))
+                break
             # fee untuk paper juga (realistis)
             if isinstance(self.broker, PaperBroker):
                 pnl -= (entry + exit_price) * qty * fee_rate
@@ -266,21 +255,21 @@ class AlternatingTrader:
         return self.trades_done
 
 
-def _build_broker(mode: str):
+def _build_broker(mode: str, exchange: str = "binance"):
+    """Broker sesuai exchange. Paper selalu PaperBroker (simulasi)."""
     if mode == "paper":
         return PaperBroker()
-    testnet = (mode == "testnet")
-    if mode == "live":
-        key = os.environ.get("BINANCE_LIVE_KEY", "")
-        sec = os.environ.get("BINANCE_LIVE_SECRET", "")
-    else:
-        key = os.environ.get("BINANCE_TESTNET_KEY", "")
-        sec = os.environ.get("BINANCE_TESTNET_SECRET", "")
-    if not key or not sec:
-        name = "BINANCE_LIVE_KEY/SECRET" if mode == "live" \
-            else "BINANCE_TESTNET_KEY/SECRET"
-        raise SystemExit(f"mode {mode} butuh {name} di environment.")
-    return BinanceBroker(api_key=key, api_secret=sec, testnet=testnet)
+    ex = get_exchange(exchange)
+    try:
+        return ex["broker_cls"](**ex["broker_kwargs"](mode))
+    except ValueError as e:
+        raise SystemExit(f"mode {mode} @ {exchange}: {e}")
+
+
+def _build_data(mode: str, exchange: str = "binance"):
+    """Data klines sesuai exchange."""
+    ex = get_exchange(exchange)
+    return ex["data_cls"](**ex["data_kwargs"](mode))
 
 
 def main(argv=None) -> int:

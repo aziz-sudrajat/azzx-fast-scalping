@@ -10,6 +10,9 @@
 Contoh (gaya bebas, urutan fleksibel):
     python -m scalping HBARUSDT --margin 100 --lev 10 --mode paper --margin-mode isolated
     python -m scalping --margin 100 --lev 10 isolated paper HBARUSDT
+    python -m scalping BTCUSDT -e bybit --margin 50 --lev 20 testnet
+
+Exchange: -e binance|okx|bybit|bitget (default: binance).
 
 Artinya: modal margin 100 USDT, leverage 10x -> posisi 1000 USDT,
 qty dihitung otomatis dari harga live. Margin mode: isolated | cross.
@@ -24,17 +27,17 @@ from __future__ import annotations
 import sys
 
 from . import config as cfg_mod
-from .data import BinanceData
-from .broker import PaperBroker, BinanceBroker
 from .risk import RiskGuard
-from .live_loop import AlternatingTrader, _build_broker, _now_wib, fmt_price
+from .live_loop import (AlternatingTrader, _build_broker, _build_data,
+                        _now_wib, fmt_price)
+from .exchanges import SUPPORTED, get_exchange
 
 
 def parse_args(args: list[str]) -> dict:
     """Parser fleksibel: dukung flag (--margin 100) dan positional
     (isolated, paper, HBARUSDT) seperti contoh user."""
     out = {"symbol": "BTCUSDT", "margin": 100.0, "lev": 10,
-           "mode": None, "margin_mode": "isolated",
+           "mode": None, "margin_mode": "isolated", "exchange": "binance",
            "max_trades": 0, "i_understand": False}
     pos = []
     it = iter(args)
@@ -49,6 +52,8 @@ def parse_args(args: list[str]) -> dict:
             out["margin_mode"] = next(it, "isolated").lower()
         elif a == "--max-trades":
             out["max_trades"] = int(next(it, "0"))
+        elif a in ("-e", "--exchange"):
+            out["exchange"] = next(it, "binance").lower()
         elif a == "--i-understand":
             out["i_understand"] = True
         elif a.startswith("-"):
@@ -70,6 +75,10 @@ def parse_args(args: list[str]) -> dict:
         raise SystemExit("--lev harus 1-125")
     if out["margin_mode"] not in ("isolated", "cross"):
         raise SystemExit("margin mode harus isolated/cross")
+    try:
+        get_exchange(out["exchange"])
+    except ValueError as e:
+        raise SystemExit(str(e))
     return out
 
 
@@ -84,8 +93,9 @@ def main(argv=None) -> int:
         raise SystemExit("mode live butuh --i-understand.")
 
     symbol = args["symbol"]
-    data = BinanceData(testnet=(mode == "testnet"))
-    broker = _build_broker(mode)
+    exchange = args["exchange"]
+    data = _build_data(mode, exchange)
+    broker = _build_broker(mode, exchange)
 
     # --- set leverage & margin type (testnet/live via API; paper simulasi) ---
     if mode in ("testnet", "live"):
