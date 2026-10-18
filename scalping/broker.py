@@ -104,6 +104,25 @@ class PaperBroker:
     def balance(self) -> float:
         return self._balance
 
+    def set_leverage(self, symbol: str, leverage: int) -> dict:
+        """Paper: catat saja (tidak ada efek margin sungguhan)."""
+        if not hasattr(self, "_leverage"):
+            self._leverage = {}
+        self._leverage[symbol.strip().upper()] = int(leverage)
+        return {"symbol": symbol.strip().upper(), "leverage": int(leverage),
+                "simulated": True}
+
+    def set_margin_type(self, symbol: str, margin_type: str) -> dict:
+        """Paper: catat saja."""
+        mt = margin_type.strip().upper()
+        if mt not in ("ISOLATED", "CROSSED"):
+            raise ValueError("margin_type harus ISOLATED atau CROSSED")
+        if not hasattr(self, "_margin_type"):
+            self._margin_type = {}
+        self._margin_type[symbol.strip().upper()] = mt
+        return {"symbol": symbol.strip().upper(), "marginType": mt,
+                "simulated": True}
+
 
 class BinanceBroker:
     """Broker Binance Futures via REST (urllib stdlib).
@@ -177,6 +196,31 @@ class BinanceBroker:
         data = self._request("POST", "/fapi/v1/order", params, signed=True)
         if not isinstance(data, dict) or "orderId" not in data:
             raise RuntimeError(f"order gagal / respons tak terduga: {data!r}")
+        return data
+
+    def set_leverage(self, symbol: str, leverage: int) -> dict:
+        """Set leverage: POST /fapi/v1/leverage."""
+        symbol = symbol.strip().upper()
+        leverage = int(leverage)
+        if not 1 <= leverage <= 125:
+            raise ValueError("leverage harus 1-125")
+        data = self._request("POST", "/fapi/v1/leverage",
+                             {"symbol": symbol, "leverage": leverage},
+                             signed=True)
+        return data
+
+    def set_margin_type(self, symbol: str, margin_type: str) -> dict:
+        """Set margin type: POST /fapi/v1/marginType.
+
+        Gagal (-4046) bila ada posisi/order terbuka — tangkap di pemanggil.
+        """
+        symbol = symbol.strip().upper()
+        mt = margin_type.strip().upper()
+        if mt not in ("ISOLATED", "CROSSED"):
+            raise ValueError("margin_type harus ISOLATED atau CROSSED")
+        data = self._request("POST", "/fapi/v1/marginType",
+                             {"symbol": symbol, "marginType": mt},
+                             signed=True)
         return data
 
     def get_position(self, symbol: str) -> dict | None:
