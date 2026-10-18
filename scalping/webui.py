@@ -122,9 +122,13 @@ label{font-size:12px;color:#8b949e}
 <div class="card"><h2>Kontrol</h2>
 <div class="controls">
 <label>Symbol <input id="symbol" value="BTCUSDT" size="10"></label>
-<label>Qty <input id="qty" value="0.001" size="7"></label>
+<label>Margin <input id="margin" value="100" size="6"></label>
+<label>Lev <input id="lev" value="10" size="4"></label>
+<label><select id="marginmode"><option value="isolated">isolated</option><option value="cross">cross</option></select></label>
 <label>Mode <select id="mode"><option value="paper">paper</option><option value="testnet">testnet</option></select></label>
 <label>Exch <select id="exchange"><option value="binance">binance</option><option value="okx">okx</option><option value="bybit">bybit</option><option value="bitget">bitget</option></select></label>
+<label>Strategy <select id="strategy"><option value="signal">signal</option><option value="alternating">alternating</option></select></label>
+<label>MaxTr <input id="maxtrades" value="0" size="4"></label>
 </div>
 <div class="controls">
 <button class="go" id="bstart" onclick="ctl('start')">▶ Start</button>
@@ -164,7 +168,8 @@ es.onmessage=e=>{const d=JSON.parse(e.data);
 };
 function setLive(on){document.getElementById('livedot').className='dot'+(on?'':' off');}
 function setStatus(t){document.getElementById('status').textContent=t;}
-function ctl(a){const q=`/api/${a}?symbol=${document.getElementById('symbol').value}&qty=${document.getElementById('qty').value}&mode=${document.getElementById('mode').value}&exchange=${document.getElementById('exchange').value}`;
+function ctl(a){const gv=id=>document.getElementById(id).value;
+const q=`/api/${a}?symbol=${gv('symbol')}&margin=${gv('margin')}&lev=${gv('lev')}&marginmode=${gv('marginmode')}&mode=${gv('mode')}&exchange=${gv('exchange')}&strategy=${gv('strategy')}&maxtrades=${gv('maxtrades')}`;
  fetch(q,{method:'POST'}).then(r=>r.json()).then(d=>{setStatus(d.msg||a);
   const b=document.getElementById('modebadge');b.textContent=d.mode||'paper';b.className='badge '+(d.mode||'paper');
   document.getElementById('modetxt').textContent=d.mode||'paper';});}
@@ -187,7 +192,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _start_trader(self, symbol, qty, mode, exchange="binance"):
+    def _start_trader(self, symbol, margin, lev, margin_mode, mode,
+                      exchange="binance", strategy="signal", max_trades=0):
         if _state["running"]:
             return {"ok": False, "msg": "sudah berjalan", "mode": _state["mode"]}
         if mode == "live":
@@ -195,18 +201,59 @@ class Handler(BaseHTTPRequestHandler):
                     "mode": mode}
         cfg = cfg_mod.load()
         cfg["MODE"] = mode
-        # pakai parameter exchange langsung (fix T3: jangan overwrite)
         broker = _build_broker(mode, exchange)  # SystemExit jika key kurang
         data = _build_data(mode, exchange)
-        risk = RiskGuard()
-        trader = AlternatingTrader(broker, data, cfg, risk, on_event=_emit)
+        # set leverage & margin-type (testnet; paper di-skip aman)
+        if mode == "testnet":
+            mt = "ISOLATED" if margin_mode == "isolated" else "CROSSED"
+            try:
+                broker.set_margin_type(symbol, mt)
+            except Exception as e:
+                return {"ok": False, "msg": f"set margin gagal: {e}"}
+            try:
+                broker.set_leverage(symbol, lev)
+            except Exception as e:
+                return {"ok": False, "msg": f"set leverage gagal: {e}"}
+        # hitung qty dari margin x lev
+        price = None
+        getter = getattr(data, "get_ticker_price", None)
+        if callable(getter):
+            try:
+                price = float(getter(symbol))
+            except Exception:
+                pass
+        if not price:
+            kl = data.get_klines(symbol, "1m", limit=2)
+            price = float(kl[-1]["close"]) if kl else 0
+        if price <= 0:
+            return {"ok": False, "msg": "harga tidak didapat"}
+        qty = margin * lev / price
+        if hasattr(broker, "get_qty_step"):
+            from .exchanges.base import quantize_down
+            qty = quantize_down(qty, broker.get_qty_step(symbol))
+        if qty <= 0:
+            return {"ok": False, "msg": "qty 0 setelah quantize"}
+        risk = RiskGuard(
+            max_daily_loss_usd=float(cfg.get("MAX_DAILY_LOSS_USD", 100.0)),
+            max_positions=int(cfg.get("MAX_POSITIONS", 1)),
+            cooldown_sec=float(cfg.get("COOLDOWN_SEC", 300.0)))
+        if strategy == "signal":
+            from .signal_loop import SignalTrader
+            trader = SignalTrader(broker, data, cfg_mod, risk,
+                                  on_event=_emit, mode=mode)
+        else:
+            trader = AlternatingTrader(broker, data, cfg, risk, on_event=_emit)
         _state.update(trader=trader, running=True, mode=mode,
-                      symbol=symbol, qty=qty, exchange=exchange)
+                      symbol=symbol, qty=qty, exchange=exchange,
+                      strategy=strategy)
         t = threading.Thread(target=_run_trader,
-                             args=(trader, symbol, qty), daemon=True)
+                             args=(trader, symbol, qty, max_trades),
+                             daemon=True)
         _state["thread"] = t
         t.start()
-        return {"ok": True, "msg": f"mulai {symbol} qty={qty}", "mode": mode}
+        return {"ok": True,
+                "msg": f"mulai {symbol} {strategy} margin={margin} lev={lev}x qty={qty:.6f}",
+                "mode": mode}
 
     def do_GET(self):
         p = urlparse(self.path)
@@ -245,10 +292,15 @@ class Handler(BaseHTTPRequestHandler):
         g = lambda k, d="": q.get(k, [d])[0]
         if p.path == "/api/start":
             try:
-                r = self._start_trader(g("symbol", "BTCUSDT").upper(),
-                                       float(g("qty", "0.001") or "0.001"),
-                                       g("mode", "paper"),
-                                       g("exchange", "binance"))
+                r = self._start_trader(
+                    g("symbol", "BTCUSDT").upper(),
+                    float(g("margin", "100") or "100"),
+                    int(g("lev", "10") or "10"),
+                    g("marginmode", "isolated"),
+                    g("mode", "paper"),
+                    g("exchange", "binance"),
+                    g("strategy", "signal"),
+                    int(g("maxtrades", "0") or "0"))
                 self._json(r)
             except SystemExit as e:
                 self._json({"ok": False, "msg": str(e)}, 400)
@@ -274,9 +326,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
 
-def _run_trader(trader, symbol, qty):
+def _run_trader(trader, symbol, qty, max_trades=0):
     try:
-        trader.run(symbol, qty, poll_sec=3.0)
+        from .signal_loop import SignalTrader
+        if isinstance(trader, SignalTrader):
+            trader.run(symbol, qty, max_trades=max_trades)
+        else:
+            trader.run(symbol, qty, max_trades=max_trades, poll_sec=3.0)
     except Exception as e:
         _emit(type="error", error=str(e))
     finally:
