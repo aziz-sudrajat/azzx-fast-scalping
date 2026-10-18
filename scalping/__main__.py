@@ -152,12 +152,14 @@ def main(argv=None) -> int:
     notional = args["margin"] * args["lev"]
     qty = notional / price
     # quantize ke LOT_SIZE agar tidak ditolak exchange (T1/T3)
-    try:
-        step = broker.get_qty_step(symbol)
-        from .exchanges.base import quantize_down
-        qty = quantize_down(qty, step)
-    except Exception as e:
-        print(f"[{_now_wib()}] peringatan: quantize qty gagal: {e}", flush=True)
+    if hasattr(broker, "get_qty_step"):
+        try:
+            step = broker.get_qty_step(symbol)
+            from .exchanges.base import quantize_down
+            qty = quantize_down(qty, step)
+        except Exception as e:
+            print(f"[{_now_wib()}] peringatan: quantize qty gagal: {e}",
+                  flush=True)
     if qty <= 0:
         print(f"[{_now_wib()}] FATAL: qty 0 setelah quantize "
               f"(margin/leverage terlalu kecil untuk {symbol})", flush=True)
@@ -166,7 +168,7 @@ def main(argv=None) -> int:
           f"x{args['lev']} = notional {notional:.2f} USDT -> qty {qty:.6f} "
           f"| mode={mode} {args['margin_mode']}", flush=True)
 
-    cfg = config.load()
+    cfg = cfg_mod.load()
     risk = RiskGuard(
         max_daily_loss_usd=float(cfg.get("MAX_DAILY_LOSS_USD", 100.0)),
         max_positions=int(cfg.get("MAX_POSITIONS", 1)),
