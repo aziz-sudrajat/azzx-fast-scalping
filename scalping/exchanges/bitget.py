@@ -88,7 +88,8 @@ class BitgetExchangeBroker(LocalPositionTracker):
         import json as _json
         body = _json.dumps(payload, separators=(",", ":"))
         data = http_post_json(self.base_url + path, payload,
-                              self._headers("POST", path, body))
+                              self._headers("POST", path, body),
+                              raw_body=body)
         if not isinstance(data, dict) or data.get("code") != "00000":
             raise HttpError(f"Bitget API gagal: {str(data)[:200]}")
         return data

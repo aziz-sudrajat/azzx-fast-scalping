@@ -115,14 +115,8 @@ def main(argv=None) -> int:
                         "red", "bold"), flush=True)
             print(paint("!" * 60, "red", "bold"), flush=True)
 
-    # --- set leverage & margin type (testnet/live via API; paper simulasi) ---
+    # --- set margin type DULU baru leverage (OKX: leverage butuh mgnMode benar) ---
     if mode in ("testnet", "live"):
-        try:
-            r = broker.set_leverage(symbol, args["lev"])
-            print(f"[{_now_wib()}] leverage {symbol} -> {args['lev']}x "
-                  f"(respon: {r.get('leverage', '?')}x)", flush=True)
-        except Exception as e:
-            print(f"[{_now_wib()}] set leverage gagal: {e}", flush=True)
         try:
             mt = "ISOLATED" if args["margin_mode"] == "isolated" else "CROSSED"
             broker.set_margin_type(symbol, mt)
@@ -130,6 +124,12 @@ def main(argv=None) -> int:
         except Exception as e:
             print(f"[{_now_wib()}] set margin-type gagal (mungkin ada posisi "
                   f"terbuka): {e}", flush=True)
+        try:
+            r = broker.set_leverage(symbol, args["lev"])
+            print(f"[{_now_wib()}] leverage {symbol} -> {args['lev']}x "
+                  f"(respon: {r.get('leverage', '?')}x)", flush=True)
+        except Exception as e:
+            print(f"[{_now_wib()}] set leverage gagal: {e}", flush=True)
     else:
         broker.set_leverage(symbol, args["lev"])
         broker.set_margin_type(symbol, args["margin_mode"])

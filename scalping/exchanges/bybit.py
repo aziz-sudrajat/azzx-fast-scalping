@@ -92,7 +92,7 @@ class BybitExchangeBroker(LocalPositionTracker):
         body = _json.dumps(payload, separators=(",", ":"))
         ts, sign = self._sign(body)
         data = http_post_json(self.base_url + path, payload,
-                              self._headers(ts, sign))
+                              self._headers(ts, sign), raw_body=body)
         if not isinstance(data, dict) or data.get("retCode") != 0:
             raise HttpError(f"Bybit API gagal: {str(data)[:200]}")
         return data

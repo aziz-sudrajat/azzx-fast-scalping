@@ -133,9 +133,17 @@ class OKXExchangeBroker(LocalPositionTracker):
             amt = float(row.get("pos", "0"))
             if amt == 0:
                 continue
-            return {"symbol": symbol.upper(), "amt": amt,
+            # net mode: posSide="net", arah dari tanda pos
+            pos_side = row.get("posSide", "")
+            if pos_side == "long":
+                side = "BUY"
+            elif pos_side == "short":
+                side = "SELL"
+            else:
+                side = "BUY" if amt > 0 else "SELL"
+            return {"symbol": symbol.upper(), "amt": abs(amt),
                     "entry_price": float(row.get("avgPx", "0")),
-                    "side": "BUY" if row.get("posSide") == "long" else "SELL"}
+                    "side": side}
         return None
 
     def get_balance(self) -> float:
@@ -148,6 +156,7 @@ class OKXExchangeBroker(LocalPositionTracker):
         leverage = int(leverage)
         if not 1 <= leverage <= 125:
             raise ValueError("leverage harus 1-125")
+        self._leverage = leverage
         inst = to_inst_id(symbol)
         td = getattr(self, "_td_mode", "isolated")
         return self._post("/api/v5/account/set-leverage",
@@ -157,11 +166,9 @@ class OKXExchangeBroker(LocalPositionTracker):
     def set_margin_type(self, symbol: str, margin_type: str) -> dict:
         mt = _norm_margin_type(margin_type)
         self._td_mode = "isolated" if mt == "ISOLATED" else "cross"
-        # OKX terapkan saat set leverage / order; sinkronkan leverage aktif
+        # re-apply leverage dengan mgnMode yang benar
         try:
-            cur = self.get_position(symbol)
-            lev = 10
-            self.set_leverage(symbol, lev)
+            self.set_leverage(symbol, getattr(self, "_leverage", 10))
         except Exception:
             pass
         return {"symbol": symbol.upper(), "marginType": mt}

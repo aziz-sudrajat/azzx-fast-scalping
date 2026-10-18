@@ -56,8 +56,12 @@ def http_get_json(url: str, headers: dict | None = None,
 
 def http_post_json(url: str, payload: dict,
                    headers: dict | None = None,
-                   timeout: int = 15) -> object:
-    body = json.dumps(payload).encode("utf-8")
+                   timeout: int = 15,
+                   raw_body: str | None = None) -> object:
+    """POST JSON. raw_body: pakai string persis ini sebagai body
+    (penting untuk exchange yang sign body — harus identik)."""
+    body_str = raw_body if raw_body is not None else json.dumps(payload)
+    body = body_str.encode("utf-8")
     h = dict(_UA)
     h["Content-Type"] = "application/json"
     h.update(headers or {})
