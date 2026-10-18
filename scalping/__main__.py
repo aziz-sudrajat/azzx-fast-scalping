@@ -182,7 +182,7 @@ def main(argv=None) -> int:
     strategy = args.get("strategy", "signal")
     if strategy == "signal":
         from .signal_loop import SignalTrader
-        trader = SignalTrader(broker, data, cfg_mod, risk)
+        trader = SignalTrader(broker, data, cfg_mod, risk, mode=mode)
         print(f"[{_now_wib()}] strategi: SIGNAL (fleksibel, ikut arah sinyal)",
               flush=True)
     else:

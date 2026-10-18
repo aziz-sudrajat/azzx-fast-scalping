@@ -33,10 +33,11 @@ class SignalTrader:
     """Eksekutor live berbasis sinyal MTF. Fleksibel, tidak dipaksa gantian."""
 
     def __init__(self, broker, data, cfg_mod, risk: RiskGuard,
-                 on_event=None):
+                 on_event=None, mode: str | None = None):
         self.broker = broker
         self.data = data
         self.cfg_mod = cfg_mod  # modul config (getattr), untuk ScalpEngine
+        self._mode = mode or getattr(cfg_mod, "MODE", "paper")
         self.engine = ScalpEngine(cfg_mod)
         self.risk = risk
         self.on_event = on_event or (lambda e: None)
@@ -89,7 +90,7 @@ class SignalTrader:
         fee_rate = 0.0005
 
         print(paint(f"[{_now_wib()}] mulai SIGNAL trader {symbol} "
-                    f"qty={qty} mode={getattr(self.cfg_mod, 'MODE', 'paper')}",
+                    f"qty={qty} mode={self._mode}",
                     "cyan", "bold"), flush=True)
         self._emit(type="started", symbol=symbol, qty=qty, strategy="signal")
 
