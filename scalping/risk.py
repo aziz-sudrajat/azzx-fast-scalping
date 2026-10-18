@@ -88,6 +88,11 @@ class RiskGuard:
             self._last_loss_ts = float(ts) if ts is not None else time.time()
 
     # ---- kill-switch ----
+    def unkill(self) -> None:
+        """Cabut kill-switch manual secara eksplisit (S3-Azz)."""
+        self._killed = False
+        self._kill_reason = ""
+
     def kill(self, reason: str = "") -> None:
         self._killed = True
         self._kill_reason = reason

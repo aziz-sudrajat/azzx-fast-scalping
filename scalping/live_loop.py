@@ -113,6 +113,15 @@ class AlternatingTrader:
         return getattr(self.cfg, name, default)
 
     def _live_price(self, symbol: str) -> float | None:
+        """Harga fresh: ticker dulu, fallback candle 1m terakhir."""
+        getter = getattr(self.data, "get_ticker_price", None)
+        if callable(getter):
+            try:
+                px = getter(symbol)
+                if px and px > 0:
+                    return float(px)
+            except Exception:
+                pass
         try:
             kl = self.data.get_klines(symbol, "1m", limit=2)
             if kl:
@@ -152,6 +161,18 @@ class AlternatingTrader:
                         "cyan", "bold"), flush=True)
         self._emit(type="started", symbol=symbol, qty=qty)
 
+        # --- rekonsiliasi: tolak start bila ada posisi nyangkut ---
+        try:
+            existing = self.broker.get_position(symbol)
+        except Exception:
+            existing = None
+        if existing is not None:
+            msg = (f"posisi terbuka terdeteksi saat start: {existing} — "
+                   f"tutup manual dulu sebelum run baru")
+            print(f"[{_now_wib()}] {msg}", flush=True)
+            self._emit(type="stopped", reason=msg)
+            return 0
+
         while not self._stop:
             if max_trades and self.trades_done >= max_trades:
                 break
@@ -185,6 +206,12 @@ class AlternatingTrader:
                       flush=True)
                 time.sleep(poll_sec)
                 continue
+            if hasattr(self.broker, "place_stop_loss"):
+                try:
+                    self.broker.place_stop_loss(symbol, side, qty, sl)
+                except Exception as e_sl:
+                    print(f"[{_now_wib()}] stop-loss exchange gagal: {e_sl} "
+                          f"— lanjut tanpa proteksi exchange!", flush=True)
             self._emit(type="trade_open", side=label, entry=entry, tp=tp,
                        sl=sl, time=_now_wib())
             ocol = "green" if label == "LONG" else "red"
@@ -217,14 +244,27 @@ class AlternatingTrader:
                     break
                 time.sleep(poll_sec)
 
-            # --- close ---
-            try:
-                res = self.broker.market_close(symbol, exit_price)
-                pnl = float(res.get("pnl_usd", 0.0))
-            except Exception as e2:
-                print(f"[{_now_wib()}] close gagal: {e2} — DARURAT: "
-                      f"cek posisi manual!", flush=True)
-                self._emit(type="error", error=str(e2))
+            # --- close: cancel stop-loss exchange dulu ---
+            if hasattr(self.broker, "cancel_stop_loss"):
+                try:
+                    self.broker.cancel_stop_loss(symbol)
+                except Exception:
+                    pass
+            res, pnl, close_ok = None, 0.0, False
+            for attempt in range(3):
+                try:
+                    res = self.broker.market_close(symbol, exit_price)
+                    pnl = float(res.get("pnl_usd", 0.0))
+                    close_ok = True
+                    break
+                except Exception as e2:
+                    print(f"[{_now_wib()}] close gagal (percobaan "
+                          f"{attempt + 1}/3): {e2}", flush=True)
+                    time.sleep(2)
+            if not close_ok:
+                print(f"[{_now_wib()}] close GAGAL 3x — DARURAT: posisi "
+                      f"mungkin masih terbuka, cek manual SEGERA!", flush=True)
+                self._emit(type="error", error="close gagal 3x")
                 break
             # fee untuk paper juga (realistis)
             if isinstance(self.broker, PaperBroker):
@@ -302,6 +342,16 @@ def main(argv=None) -> int:
 
     broker = _build_broker(mode, exchange)
     data = _build_data(mode, exchange)
+    # pre-flight: validasi kredensial via get_balance (R1-Azz)
+    if mode in ("testnet", "live") and hasattr(broker, "get_balance"):
+        try:
+            bal = broker.get_balance()
+            print(f"[{_now_wib()}] pre-flight OK: balance {bal:.2f} USDT",
+                  flush=True)
+        except Exception as e:
+            print(f"[{_now_wib()}] FATAL: pre-flight get_balance gagal: {e}",
+                  flush=True)
+            return 1
     risk = RiskGuard()
     trader = AlternatingTrader(broker, data, cfg, risk)
     try:

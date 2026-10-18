@@ -57,7 +57,7 @@ def parse_args(args: list[str]) -> dict:
         elif a == "--i-understand":
             out["i_understand"] = True
         elif a.startswith("-"):
-            continue  # flag tak dikenal -> abaikan
+            raise ValueError(f"flag tak dikenal: {a}")
         else:
             pos.append(a)
     # positional: kenali isolated/cross, paper/testnet/live, sisanya symbol
@@ -117,19 +117,22 @@ def main(argv=None) -> int:
 
     # --- set margin type DULU baru leverage (OKX: leverage butuh mgnMode benar) ---
     if mode in ("testnet", "live"):
+        # fail-closed di live/testnet: setting risk harus pasti teraplikasi
         try:
             mt = "ISOLATED" if args["margin_mode"] == "isolated" else "CROSSED"
             broker.set_margin_type(symbol, mt)
             print(f"[{_now_wib()}] margin mode {symbol} -> {mt}", flush=True)
         except Exception as e:
-            print(f"[{_now_wib()}] set margin-type gagal (mungkin ada posisi "
-                  f"terbuka): {e}", flush=True)
+            print(f"[{_now_wib()}] FATAL: set margin-type gagal: {e}",
+                  flush=True)
+            return 1
         try:
             r = broker.set_leverage(symbol, args["lev"])
             print(f"[{_now_wib()}] leverage {symbol} -> {args['lev']}x "
                   f"(respon: {r.get('leverage', '?')}x)", flush=True)
         except Exception as e:
-            print(f"[{_now_wib()}] set leverage gagal: {e}", flush=True)
+            print(f"[{_now_wib()}] FATAL: set leverage gagal: {e}", flush=True)
+            return 1
     else:
         broker.set_leverage(symbol, args["lev"])
         broker.set_margin_type(symbol, args["margin_mode"])
@@ -148,11 +151,27 @@ def main(argv=None) -> int:
         raise SystemExit(f"harga {symbol} kosong (fail-closed)")
     notional = args["margin"] * args["lev"]
     qty = notional / price
+    # quantize ke LOT_SIZE agar tidak ditolak exchange (T1/T3)
+    try:
+        step = broker.get_qty_step(symbol)
+        from .exchanges.base import quantize_down
+        qty = quantize_down(qty, step)
+    except Exception as e:
+        print(f"[{_now_wib()}] peringatan: quantize qty gagal: {e}", flush=True)
+    if qty <= 0:
+        print(f"[{_now_wib()}] FATAL: qty 0 setelah quantize "
+              f"(margin/leverage terlalu kecil untuk {symbol})", flush=True)
+        return 1
     print(f"[{_now_wib()}] {symbol} @ {fmt_price(price)} | margin {args['margin']} USDT "
           f"x{args['lev']} = notional {notional:.2f} USDT -> qty {qty:.6f} "
           f"| mode={mode} {args['margin_mode']}", flush=True)
 
-    risk = RiskGuard()
+    cfg = config.load()
+    risk = RiskGuard(
+        max_daily_loss_usd=float(cfg.get("MAX_DAILY_LOSS_USD", 100.0)),
+        max_positions=int(cfg.get("MAX_POSITIONS", 1)),
+        cooldown_sec=float(cfg.get("COOLDOWN_SEC", 300.0)),
+    )
     trader = AlternatingTrader(broker, data, cfg, risk)
     try:
         trader.run(symbol, qty, max_trades=args["max_trades"])

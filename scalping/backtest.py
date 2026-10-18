@@ -34,9 +34,13 @@ def _time(candle):
 
 
 def _window_upto(candles, t):
-    """Window histori candle dengan waktu <= t (best-effort bila tanpa waktu)."""
+    """Window histori candle dengan waktu <= t.
+
+    Fail-closed: bila t None (candle tanpa time key), kembalikan list
+    kosong agar tidak bocor data masa depan (R2-Azz).
+    """
     if t is None:
-        return list(candles)
+        return []
     return [c for c in candles if _time(c) is not None and _time(c) <= t]
 
 

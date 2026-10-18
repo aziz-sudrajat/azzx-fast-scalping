@@ -32,6 +32,8 @@ BASE_URL = "https://fapi.binance.com"
 
 _EXCLUDE_QUOTES = ("USDC", "FDUSD", "TUSD", "DAI", "EUR", "BRL")
 _EXCLUDE_SUFFIX = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+# base stablecoin / komoditas yang lolos filter quote (R6-Azz)
+_EXCLUDE_BASE = ("USDD", "USDJ", "XAUT", "PAXG", "BFUSD")
 
 
 def _http_get(url: str, timeout: int = 15):
@@ -62,7 +64,7 @@ def pick_candidates(tickers: list[dict], min_quote_vol: float,
         if sym.endswith(_EXCLUDE_SUFFIX):
             continue
         base = sym[:-4]
-        if base in _EXCLUDE_QUOTES:
+        if base in _EXCLUDE_QUOTES or base in _EXCLUDE_BASE:
             continue
         try:
             qv = float(t.get("quoteVolume", "0"))

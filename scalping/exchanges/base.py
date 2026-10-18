@@ -96,6 +96,23 @@ def check_keys(mapping: dict, names: list[str], exchange: str) -> None:
             f"(set via environment)")
 
 
+def quantize_down(qty: float, step: float) -> float:
+    """Bulatkan qty KE BAWAH ke kelipatan step (LOT_SIZE).
+
+    Selalu round-down agar tidak melebihi niat user / tidak ditolak
+    exchange karena melebihi step. Return 0.0 bila qty < step.
+    """
+    qty = float(qty)
+    step = float(step)
+    if step <= 0:
+        raise ValueError(f"step harus > 0, dapat {step!r}")
+    if qty <= 0:
+        return 0.0
+    import math
+    steps = math.floor(qty / step + 1e-9)
+    return steps * step
+
+
 def norm_symbol_usdt(symbol: str) -> str:
     """BTCUSDT / btcusdt / BTC-USDT -> BTCUSDT."""
     s = symbol.strip().upper().replace("-", "").replace("_", "").replace("/", "")
@@ -121,6 +138,11 @@ def _norm_margin_type(mt: str) -> str:
 
 
 class LocalPositionTracker:
+    """Tracking posisi lokal. CATATAN: hanya mendukung mode ONE-WAY / NET.
+
+    Akun hedge mode (long & short bersamaan di simbol sama) TIDAK didukung —
+    get_position hanya membaca satu sisi. Set akun ke one-way sebelum live.
+    """
     """Tracker entry lokal untuk broker real (pnl display).
 
     Order sungguhan tetap lewat API exchange; tracker ini hanya untuk
@@ -132,16 +154,35 @@ class LocalPositionTracker:
 
     def _track_open(self, symbol: str, side: str, qty: float,
                     price: float) -> None:
-        self._pos[symbol.upper()] = {"side": _norm_side(side),
-                                     "qty": float(qty),
-                                     "entry": float(price)}
+        key = symbol.upper()
+        side = _norm_side(side)
+        qty = float(qty)
+        price = float(price)
+        cur = self._pos.get(key)
+        if cur is not None and cur["side"] == side:
+            total = cur["qty"] + qty
+            cur["entry"] = (cur["entry"] * cur["qty"] + price * qty) / total
+            cur["qty"] = total
+        else:
+            self._pos[key] = {"side": side, "qty": qty, "entry": price}
 
     def _track_close(self, symbol: str, price: float,
-                     fee_rate: float = 0.0005) -> dict:
+                     fee_rate: float = 0.0005,
+                     fallback_entry: float | None = None,
+                     fallback_side: str | None = None,
+                     fallback_qty: float | None = None) -> dict:
+        """Tutup tracking. Bila untracked (mis. setelah restart), pakai
+        fallback dari exchange agar PnL & risk guard akurat (T4-Azz)."""
         symbol = symbol.upper()
         pos = self._pos.pop(symbol, None)
         if pos is None:
-            return {"pnl_usd": 0.0, "untracked": True}
+            if (fallback_entry is not None and fallback_side is not None
+                    and fallback_qty):
+                pos = {"side": _norm_side(fallback_side),
+                       "qty": float(fallback_qty),
+                       "entry": float(fallback_entry)}
+            else:
+                return {"pnl_usd": 0.0, "flat": True, "untracked": True}
         entry, qty = pos["entry"], pos["qty"]
         gross = (price - entry) * qty if pos["side"] == "BUY" \
             else (entry - price) * qty

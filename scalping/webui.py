@@ -40,7 +40,7 @@ _state = {
     "exchange": "binance",
     "symbol": "BTCUSDT",
     "qty": 0.001,
-    "events": queue.Queue(),
+    "events": queue.Queue(maxsize=1000),
     "last": {},   # status terakhir: price, position, pnl
     "log": [],    # baris trade log (maks 200)
 }
@@ -49,7 +49,18 @@ _state = {
 def _emit(ev: dict):
     ev = dict(ev)
     ev.setdefault("ts", _now_wib())
-    _state["events"].put(ev)
+    q = _state["events"]
+    try:
+        q.put_nowait(ev)
+    except queue.Full:
+        try:
+            q.get_nowait()
+        except Exception:
+            pass
+        try:
+            q.put_nowait(ev)
+        except Exception:
+            pass
     if ev.get("type") == "trade_close":
         line = (f"{ev['time']} | {ev['side']} | Entry: {fmt_price(ev['entry'])} | "
                 f"TP: {fmt_price(ev['tp'])} | PnL: {ev['pnl']:+.2f} [{ev['why']}]")
@@ -184,7 +195,7 @@ class Handler(BaseHTTPRequestHandler):
                     "mode": mode}
         cfg = cfg_mod.load()
         cfg["MODE"] = mode
-        exchange = _state.get("exchange", "binance")
+        # pakai parameter exchange langsung (fix T3: jangan overwrite)
         broker = _build_broker(mode, exchange)  # SystemExit jika key kurang
         data = _build_data(mode, exchange)
         risk = RiskGuard()

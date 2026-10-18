@@ -117,6 +117,13 @@ class BinanceData:
                 f"respons Binance bukan JSON valid ({url})"
             ) from exc
 
+    def get_ticker_price(self, symbol: str) -> float:
+        """Harga ticker real-time (mark price). Untuk entry/monitor live."""
+        norm_symbol = normalize_symbol(symbol)
+        url = f"{self.base_url}/fapi/v1/ticker/price?symbol={norm_symbol}"
+        data = self._http_get_json(url)
+        return float(data["price"])
+
     def get_klines(
         self, symbol: str, interval: str, limit: int = KLINES_LIMIT
     ) -> list[dict[str, float]]:
