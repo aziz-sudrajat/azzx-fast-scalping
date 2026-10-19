@@ -61,10 +61,10 @@ _state = {
     "log": [],             # baris trade log (maks 200)
     "closed": [],          # trade tertutup (maks 500): dict
     "equity": [],          # [{"t": ts_wib, "eq": pnl_kumulatif}]
-    "engine_tile": {"status": "idle", "last_signal": None, "ts": None},
+    "engine_tile": {"status": "idle", "last_signal": None, "ts": None, "epoch": 0.0},
     "exec_tile": {"status": "idle", "last_order": None, "mode": "paper",
-                  "ts": None},
-    "scan_tile": {"status": "idle", "coins": [], "ts": None},
+                  "ts": None, "epoch": 0.0},
+    "scan_tile": {"status": "idle", "coins": [], "ts": None, "epoch": 0.0},
     "klines": [],          # [[o,h,l,c], ...] cache
     "klines_ts": 0.0,
     "klines_symbol": "",
@@ -72,7 +72,7 @@ _state = {
 
 
 def _tile(status, **kw):
-    d = {"status": status, "ts": _now_wib()}
+    d = {"status": status, "ts": _now_wib(), "epoch": time.time()}
     d.update(kw)
     return d
 
@@ -557,6 +557,30 @@ canvas{width:100%;height:220px;background:#05060d;border:1px solid #1c2440;borde
 .lamp.idle{background:#5a6378}
 .deskb{font-size:12.5px;line-height:1.7;color:#c3cbE4}
 .deskb .ts{color:#5f6a8c;font-size:11px}
+.botwrap{position:relative;margin-left:auto;width:46px;height:46px;flex-shrink:0}
+.botwrap .radar{display:none;position:absolute;inset:-7px;border-radius:50%;background:conic-gradient(from 0deg,rgba(0,229,255,.4),transparent 28%);animation:radar-spin 2.2s linear infinite;pointer-events:none}
+.botwrap.scanning .radar{display:block}
+.botwrap.sleeping::after{content:'\1F4A4';position:absolute;top:-8px;right:-4px;font-size:14px;animation:zzz 2.6s ease-in infinite;pointer-events:none}
+.bot{display:block;width:46px;height:46px}
+.bot .p{transform-box:fill-box;transform-origin:center}
+.bot-eye{animation:bot-blink 4.2s infinite}
+.bot-ant{animation:ant-pulse 2s ease-in-out infinite}
+.bot-idle{animation:bot-breathe 3.2s ease-in-out infinite}
+.bot-walk{animation:bot-walk 1.7s ease-in-out infinite}
+.bot-work{animation:bot-nod 1.1s ease-in-out infinite}
+.bot-jump{animation:bot-jump .7s ease-in-out 4}
+.bot-alert{--ac:#ff5252!important;animation:bot-shake .32s linear infinite}
+.bot-sleep{animation:bot-sleep 3s ease-in-out infinite}
+@keyframes bot-blink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.12)}}
+@keyframes ant-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes bot-breathe{0%,100%{transform:scaleY(1)}50%{transform:scaleY(1.06)}}
+@keyframes bot-walk{0%,100%{transform:translateX(-7px) rotate(-2deg)}50%{transform:translateX(7px) rotate(2deg)}}
+@keyframes bot-nod{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(8deg)}}
+@keyframes bot-jump{0%,100%{transform:translateY(0)}40%{transform:translateY(-9px)}}
+@keyframes bot-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-2.5px) rotate(-3deg)}75%{transform:translateX(2.5px) rotate(3deg)}}
+@keyframes bot-sleep{0%,100%{transform:rotate(-5deg) translateY(0)}50%{transform:rotate(-5deg) translateY(2.5px)}}
+@keyframes radar-spin{to{transform:rotate(360deg)}}
+@keyframes zzz{0%{opacity:0;transform:translateY(5px) scale(.7)}30%{opacity:1}100%{opacity:0;transform:translateY(-11px) scale(1.15)}}
 .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
 button{font-family:inherit;font-size:13px;font-weight:700;padding:10px 20px;border-radius:10px;border:1px solid #2a3352;background:#161c33;color:#e8ecf5;cursor:pointer;transition:.15s}
 button:hover{transform:translateY(-1px);background:#1d2440}
@@ -596,10 +620,10 @@ table.pos td{padding:8px 6px;border-top:1px solid #1c2440}
 <div class="card"><h2>&#x1F4C2; Open Positions</h2><div id="positions"><span class="info" style="color:#5f6a8c">tidak ada posisi</span></div></div>
 <div class="card"><h2>&#x1F9FE; Trade Log</h2><div class="log" id="tradelog"><div class="info">menunggu trade&hellip;</div></div></div>
 <section class="desks">
-<div class="card desk"><div class="deskhead"><div class="lamp idle" id="lamp-scanner"></div><h2>&#x1F4E1; Scanner</h2></div><div class="deskb" id="desk-scanner">memuat&hellip;</div></div>
-<div class="card desk"><div class="deskhead"><div class="lamp idle" id="lamp-engine"></div><h2>&#x2699;&#xFE0F; Signal Engine</h2></div><div class="deskb" id="desk-engine">idle</div></div>
-<div class="card desk"><div class="deskhead"><div class="lamp idle" id="lamp-exec"></div><h2>&#x1F680; Executor</h2></div><div class="deskb" id="desk-exec">idle</div></div>
-<div class="card desk"><div class="deskhead"><div class="lamp idle" id="lamp-risk"></div><h2>&#x1F6E1;&#xFE0F; Risk Guard</h2></div><div class="deskb" id="desk-risk">idle</div></div>
+<div class="card desk"><div class="deskhead"><div class="lamp idle" id="lamp-scanner"></div><h2>&#x1F4E1; Scanner</h2><span class="botwrap" id="wrap-scanner"><span class="radar"></span><svg class="bot bot-idle" id="bot-scanner" viewBox="0 0 48 48" style="--ac:#00e5ff"><line x1="24" y1="5" x2="24" y2="11" stroke="var(--ac)" stroke-width="2"/><circle class="p bot-ant" cx="24" cy="4.5" r="2.6" fill="var(--ac)"/><rect x="13" y="11" width="22" height="14" rx="6" fill="#1a2140" stroke="var(--ac)" stroke-width="1.8"/><circle class="p bot-eye" cx="20" cy="18" r="2.4" fill="var(--ac)"/><circle class="p bot-eye" cx="28" cy="18" r="2.4" fill="var(--ac)"/><rect x="17" y="27" width="14" height="11" rx="4" fill="#1a2140" stroke="var(--ac)" stroke-width="1.8"/><line x1="16" y1="29" x2="10.5" y2="33" stroke="var(--ac)" stroke-width="2.6" stroke-linecap="round"/><line x1="32" y1="29" x2="37.5" y2="33" stroke="var(--ac)" stroke-width="2.6" stroke-linecap="round"/><rect x="18" y="40" width="5" height="5" rx="2" fill="var(--ac)"/><rect x="25" y="40" width="5" height="5" rx="2" fill="var(--ac)"/></svg></span></div><div class="deskb" id="desk-scanner">memuat&hellip;</div></div>
+<div class="card desk"><div class="deskhead"><div class="lamp idle" id="lamp-engine"></div><h2>&#x2699;&#xFE0F; Signal Engine</h2><span class="botwrap" id="wrap-engine"><span class="radar"></span><svg class="bot bot-idle" id="bot-engine" viewBox="0 0 48 48" style="--ac:#b388ff"><line x1="24" y1="5" x2="24" y2="11" stroke="var(--ac)" stroke-width="2"/><circle class="p bot-ant" cx="24" cy="4.5" r="2.6" fill="var(--ac)"/><rect x="13" y="11" width="22" height="14" rx="6" fill="#1a2140" stroke="var(--ac)" stroke-width="1.8"/><circle class="p bot-eye" cx="20" cy="18" r="2.4" fill="var(--ac)"/><circle class="p bot-eye" cx="28" cy="18" r="2.4" fill="var(--ac)"/><rect x="17" y="27" width="14" height="11" rx="4" fill="#1a2140" stroke="var(--ac)" stroke-width="1.8"/><line x1="16" y1="29" x2="10.5" y2="33" stroke="var(--ac)" stroke-width="2.6" stroke-linecap="round"/><line x1="32" y1="29" x2="37.5" y2="33" stroke="var(--ac)" stroke-width="2.6" stroke-linecap="round"/><rect x="18" y="40" width="5" height="5" rx="2" fill="var(--ac)"/><rect x="25" y="40" width="5" height="5" rx="2" fill="var(--ac)"/></svg></span></div><div class="deskb" id="desk-engine">idle</div></div>
+<div class="card desk"><div class="deskhead"><div class="lamp idle" id="lamp-exec"></div><h2>&#x1F680; Executor</h2><span class="botwrap" id="wrap-exec"><span class="radar"></span><svg class="bot bot-idle" id="bot-exec" viewBox="0 0 48 48" style="--ac:#00e676"><line x1="24" y1="5" x2="24" y2="11" stroke="var(--ac)" stroke-width="2"/><circle class="p bot-ant" cx="24" cy="4.5" r="2.6" fill="var(--ac)"/><rect x="13" y="11" width="22" height="14" rx="6" fill="#1a2140" stroke="var(--ac)" stroke-width="1.8"/><circle class="p bot-eye" cx="20" cy="18" r="2.4" fill="var(--ac)"/><circle class="p bot-eye" cx="28" cy="18" r="2.4" fill="var(--ac)"/><rect x="17" y="27" width="14" height="11" rx="4" fill="#1a2140" stroke="var(--ac)" stroke-width="1.8"/><line x1="16" y1="29" x2="10.5" y2="33" stroke="var(--ac)" stroke-width="2.6" stroke-linecap="round"/><line x1="32" y1="29" x2="37.5" y2="33" stroke="var(--ac)" stroke-width="2.6" stroke-linecap="round"/><rect x="18" y="40" width="5" height="5" rx="2" fill="var(--ac)"/><rect x="25" y="40" width="5" height="5" rx="2" fill="var(--ac)"/></svg></span></div><div class="deskb" id="desk-exec">idle</div></div>
+<div class="card desk"><div class="deskhead"><div class="lamp idle" id="lamp-risk"></div><h2>&#x1F6E1;&#xFE0F; Risk Guard</h2><span class="botwrap" id="wrap-risk"><span class="radar"></span><svg class="bot bot-sleep" id="bot-risk" viewBox="0 0 48 48" style="--ac:#ffd60a"><line x1="24" y1="5" x2="24" y2="11" stroke="var(--ac)" stroke-width="2"/><circle class="p bot-ant" cx="24" cy="4.5" r="2.6" fill="var(--ac)"/><rect x="13" y="11" width="22" height="14" rx="6" fill="#1a2140" stroke="var(--ac)" stroke-width="1.8"/><circle class="p bot-eye" cx="20" cy="18" r="2.4" fill="var(--ac)"/><circle class="p bot-eye" cx="28" cy="18" r="2.4" fill="var(--ac)"/><rect x="17" y="27" width="14" height="11" rx="4" fill="#1a2140" stroke="var(--ac)" stroke-width="1.8"/><line x1="16" y1="29" x2="10.5" y2="33" stroke="var(--ac)" stroke-width="2.6" stroke-linecap="round"/><line x1="32" y1="29" x2="37.5" y2="33" stroke="var(--ac)" stroke-width="2.6" stroke-linecap="round"/><rect x="18" y="40" width="5" height="5" rx="2" fill="var(--ac)"/><rect x="25" y="40" width="5" height="5" rx="2" fill="var(--ac)"/></svg></span></div><div class="deskb" id="desk-risk">idle</div></div>
 </section>
 <div class="card"><h2>&#x1F39B;&#xFE0F; Kontrol</h2>
 <div class="controls">
@@ -708,25 +732,37 @@ function render(){
     dv.innerHTML='<span class="'+(win?'win':'loss')+'">'+(win?'\u25B2':'\u25BC')+' '+esc(tr.time)+' | '+esc(tr.side)+' '+esc(tr.symbol||'')+' | Entry '+fp(tr.entry)+' | PnL '+(tr.pnl>=0?'+':'')+Number(tr.pnl).toFixed(2)+' ['+esc(tr.why||'')+']</span>';
     lg.appendChild(dv);});
   });
+function tileAge(t){return (t&&t.epoch)?(Date.now()/1000-t.epoch):1e9;}
+function setBot(svgId,wrapId,cls,extra){
+ var s=document.getElementById(svgId);if(!s)return;
+ s.setAttribute('class','bot '+cls);
+ var w=document.getElementById(wrapId);if(!w)return;
+ w.classList.toggle('scanning',!!(extra&&extra.scanning));
+ w.classList.toggle('sleeping',cls==='bot-sleep');
+}
   // desk tiles
   const dk=d.desks||{};
   const sc=dk.scanner||{},en=dk.engine||{},ex=dk.executor||{},rk=dk.risk||{};
   setLamp('lamp-scanner',lampFor(sc.status));
+  setBot('bot-scanner','wrap-scanner',sc.status==='ok'?'bot-walk':(sc.status==='error'?'bot-alert':'bot-idle'),{scanning:sc.status==='ok'});
   document.getElementById('desk-scanner').innerHTML=
    (sc.coins||[]).map(c=>esc(c.symbol)+' <b>'+(Number(c.change_pct)>=0?'+':'')+c.change_pct+'%</b>').join('<br>')||'<span class="ts">belum ada hasil scan</span>'+
    '<br><span class="ts">'+esc(sc.ts||'')+'</span>';
   setLamp('lamp-engine',lampFor(en.status));
+  setBot('bot-engine','wrap-engine',en.status==='error'?'bot-alert':((en.status==='open'||en.status==='waiting')?'bot-work':'bot-idle'));
   const ls=en.last_signal;
   document.getElementById('desk-engine').innerHTML=
    (ls?('<b class="'+(ls.side==='LONG'?'up':'dn')+'">'+esc(ls.side)+'</b> @ '+fp(ls.entry)+' (str '+ls.strength+'/3)<br><span class="ts">'+esc(ls.reason||'')+'</span>'):'<span class="ts">menunggu sinyal</span>')+
    '<br><span class="ts">status: '+esc(en.status)+' &middot; '+esc(en.ts||'')+'</span>';
   setLamp('lamp-exec',lampFor(ex.status));
+  setBot('bot-exec','wrap-exec',ex.status==='error'?'bot-alert':((ex.status==='running'&&tileAge(ex)<60)?'bot-jump':'bot-idle'));
   const lo=ex.last_order;
   document.getElementById('desk-exec').innerHTML=
    'mode: <b>'+esc(ex.mode||d.mode)+'</b><br>'+
    (lo?('last: '+esc(lo.kind)+' <b>'+esc(lo.side)+'</b>'+(lo.pnl!=null?' PnL '+(lo.pnl>=0?'+':'')+Number(lo.pnl).toFixed(2):'')+'<br><span class="ts">'+esc(lo.time||'')+'</span>'):'<span class="ts">belum ada order</span>')+
    '<br><span class="ts">status: '+esc(ex.status)+' &middot; '+esc(ex.ts||'')+'</span>';
   setLamp('lamp-risk',lampFor(rk.status));
+  setBot('bot-risk','wrap-risk',(rk.killed||rk.status==='warning'||rk.status==='killed')?'bot-alert':'bot-sleep');
   document.getElementById('desk-risk').innerHTML=
    'daily PnL: <b class="'+((rk.daily_pnl||0)<0?'dn':'up')+'">'+((rk.daily_pnl||0)>=0?'+':'')+Number(rk.daily_pnl||0).toFixed(2)+'</b> / -'+Number(rk.max_daily_loss||100).toFixed(0)+'<br>'+
    'kill-switch: <b class="'+(rk.killed?'dn':'up')+'">'+(rk.killed?'AKTIF':'off')+'</b>'+(rk.kill_reason?'<br><span class="ts">'+esc(rk.kill_reason)+'</span>':'')+

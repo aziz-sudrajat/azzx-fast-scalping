@@ -120,3 +120,32 @@ def test_emit_updates_tiles():
     wu._state["log"] = []
     wu._state["engine_tile"] = wu._tile("idle")
     wu._state["exec_tile"] = wu._tile("idle", mode="paper")
+
+
+def test_robots_present_in_html(server):
+    status, body = _get(server, "/")
+    assert status == 200
+    text = body.decode("utf-8")
+    for rid in ("bot-scanner", "bot-engine", "bot-exec", "bot-risk"):
+        assert 'id="%s"' % rid in text, "robot hilang: %s" % rid
+        assert 'id="wrap-%s"' % rid.replace("bot-", "") in text, \
+            "wrapper hilang: %s" % rid
+    assert text.count('class="bot bot-') == 4
+    for cls in (".bot-idle{", ".bot-walk{", ".bot-work{", ".bot-jump{",
+                ".bot-alert{", ".bot-sleep{"):
+        assert cls in text, "class animasi hilang: %s" % cls
+    for kf in ("@keyframes bot-walk", "@keyframes bot-nod",
+               "@keyframes bot-jump", "@keyframes bot-sleep",
+               "@keyframes bot-shake", "@keyframes radar-spin",
+               "@keyframes zzz", "@keyframes bot-blink"):
+        assert kf in text, "keyframes hilang: %s" % kf
+    assert "tileAge" in text and "setBot" in text
+
+
+def test_tiles_have_epoch(server):
+    status, body = _get(server, "/api/state")
+    assert status == 200
+    d = json.loads(body)
+    for name in ("scanner", "engine", "executor", "risk"):
+        assert "epoch" in d["desks"][name], "epoch hilang: %s" % name
+        assert isinstance(d["desks"][name]["epoch"], (int, float))
