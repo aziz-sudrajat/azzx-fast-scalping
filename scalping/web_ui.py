@@ -655,7 +655,7 @@ function drawEquity(eq){
 function drawKlines(kl){
  const c=klc.getContext('2d'),W=klc.width,H=klc.height;
  c.clearRect(0,0,W,H);
- if(!kl||!kl.length){c.fillStyle='#5f6a8c';c.font='12px monospace';c.fillText('memuat klines&hellip;',14,H/2);return;}
+ if(!kl||!kl.length){c.fillStyle='#5f6a8c';c.font='12px monospace';c.fillText('memuat klines…',14,H/2);return;}
  let mn=1e18,mx=-1e18;kl.forEach(k=>{mn=Math.min(mn,k[2]);mx=Math.max(mx,k[1]);});
  const rg=(mx-mn)||1,pad=10,cw=(W-2*pad)/kl.length;
  const Y=v=>H-pad-((v-mn)/rg)*(H-2*pad);
