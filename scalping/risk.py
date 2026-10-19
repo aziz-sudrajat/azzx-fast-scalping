@@ -10,7 +10,7 @@
 Tolak trade baru jika:
 - kill-switch aktif (manual),
 - kerugian harian sudah mencapai max_daily_loss_usd,
-- jumlah posisi terbuka >= max_positions,
+- jumlah posisi terbuka >= max_positions (0 = tanpa batas),
 - masih dalam cooldown setelah trade yang loss.
 
 Fail-closed: bila ragu, tolak (return (False, alasan)).
@@ -31,8 +31,8 @@ class RiskGuard:
     ) -> None:
         if max_daily_loss_usd <= 0:
             raise ValueError("max_daily_loss_usd harus > 0")
-        if max_positions < 1:
-            raise ValueError("max_positions minimal 1")
+        if max_positions < 0:
+            raise ValueError("max_positions tidak boleh negatif (0 = tanpa batas)")
         if cooldown_sec < 0:
             raise ValueError("cooldown_sec tidak boleh negatif")
         self.max_daily_loss_usd = float(max_daily_loss_usd)
@@ -69,7 +69,7 @@ class RiskGuard:
                 False,
                 f"daily loss tercapai ({self._daily_pnl:.2f} <= -{self.max_daily_loss_usd:.2f} USD)",
             )
-        if open_count >= self.max_positions:
+        if self.max_positions > 0 and open_count >= self.max_positions:
             return False, f"max posisi tercapai ({open_count}/{self.max_positions})"
         if self._last_loss_ts is not None and self.cooldown_sec > 0:
             elapsed = time.time() - self._last_loss_ts

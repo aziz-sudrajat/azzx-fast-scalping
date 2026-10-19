@@ -100,7 +100,22 @@ class TestRiskGuard(unittest.TestCase):
         with self.assertRaises(ValueError):
             RiskGuard(max_daily_loss_usd=0)
         with self.assertRaises(ValueError):
-            RiskGuard(max_positions=0)
+            RiskGuard(max_positions=-1)
+
+    def test_max_positions_nol_artinya_tanpa_batas(self):
+        g = RiskGuard(max_positions=0)
+        ok, _ = g.check("BTCUSDT", 99)
+        self.assertTrue(ok)
+        ok, _ = g.check("BTCUSDT", 0)
+        self.assertTrue(ok)
+
+    def test_max_positions_batas_ditegakkan(self):
+        g = RiskGuard(max_positions=2)
+        ok, _ = g.check("BTCUSDT", 1)
+        self.assertTrue(ok)
+        ok, reason = g.check("BTCUSDT", 2)
+        self.assertFalse(ok)
+        self.assertIn("max posisi", reason)
 
 
 if __name__ == "__main__":

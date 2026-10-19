@@ -176,13 +176,14 @@ def main(argv=None) -> int:
     cfg = cfg_mod.load()
     risk = RiskGuard(
         max_daily_loss_usd=float(cfg.get("MAX_DAILY_LOSS_USD", 100.0)),
-        max_positions=int(cfg.get("MAX_POSITIONS", 1)),
+        max_positions=int(cfg.get("MAX_POSITIONS", 0)),  # 0 = tanpa batas
         cooldown_sec=float(cfg.get("COOLDOWN_SEC", 300.0)),
     )
     strategy = args.get("strategy", "signal")
     if strategy == "signal":
         from .signal_loop import SignalTrader
-        trader = SignalTrader(broker, data, cfg_mod, risk, mode=mode)
+        trader = SignalTrader(broker, data, cfg_mod, risk, mode=mode,
+                                leverage=args["lev"])
         print(f"[{_now_wib()}] strategi: SIGNAL (fleksibel, ikut arah sinyal)",
               flush=True)
     else:

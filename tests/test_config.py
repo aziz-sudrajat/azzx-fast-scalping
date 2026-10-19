@@ -128,13 +128,20 @@ class TestHelpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             config.validate(cfg)
 
+    def test_validate_max_positions_nol_valid(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            cfg = config.load(env_path="/tmp/tidak-ada-xyz/.env")
+        good = dict(cfg)
+        good["MAX_POSITIONS"] = 0  # 0 = tanpa batas, harus lolos
+        config.validate(good)
+
     def test_validate_menolak_nilai_risiko_aneh(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             cfg = config.load(env_path="/tmp/tidak-ada-xyz/.env")
         for key, bad in (
             ("EMA_SLOW", 9),        # harus > EMA_FAST
             ("TP_ATR_MULT", -1.0),  # harus > 0
-            ("MAX_POSITIONS", 0),   # harus >= 1
+            ("MAX_POSITIONS", -1),  # negatif tidak boleh (0 = tanpa batas)
             ("TAKER_FEE", 0.5),     # di atas 10% tak masuk akal
             ("SYMBOLS", []),        # tak boleh kosong
         ):

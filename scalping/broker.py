@@ -103,6 +103,45 @@ class PaperBroker:
             "status": "FILLED",
         }
 
+    def close_qty(self, symbol: str, qty: float, price: float) -> dict:
+        """Tutup SEBAGIAN posisi (untuk multi-position).
+
+        Kembalikan pnl_usd khusus porsi yang ditutup. Posisi dihapus bila
+        sisa qty ~0. Beda dengan market_close yang selalu menutup semua.
+        """
+        symbol = symbol.strip().upper()
+        qty = float(qty)
+        price = float(price)
+        if qty <= 0:
+            raise ValueError("qty harus > 0")
+        if price <= 0:
+            raise ValueError("price harus > 0")
+        pos = self._positions.get(symbol)
+        if pos is None:
+            raise RuntimeError(f"tidak ada posisi terbuka untuk {symbol}")
+        if qty > pos["qty"] + 1e-12:
+            raise ValueError(f"qty tutup {qty} > posisi {pos['qty']}")
+        entry = pos["avg_price"]
+        if pos["side"] == "BUY":
+            pnl = (price - entry) * qty
+        else:
+            pnl = (entry - price) * qty
+        self._balance += pnl
+        pos["qty"] -= qty
+        if pos["qty"] <= 1e-12:
+            del self._positions[symbol]
+        return {
+            "symbol": symbol,
+            "side": pos["side"],
+            "qty": qty,
+            "entry_price": entry,
+            "exit_price": price,
+            "pnl_usd": pnl,
+            "balance": self._balance,
+            "status": "FILLED",
+            "remaining_qty": pos.get("qty", 0.0),
+        }
+
     def get_position(self, symbol: str) -> dict | None:
         symbol = symbol.strip().upper()
         pos = self._positions.get(symbol)

@@ -254,7 +254,7 @@ def validate(cfg: dict[str, Any]) -> dict[str, Any]:
     _num("TAKER_FEE", lo=0, hi=0.1)
     _num("SLIPPAGE", lo=0, hi=0.1)
     _num("MAX_DAILY_LOSS_USD", lo=0)
-    _num("MAX_POSITIONS", lo=1)
+    _num("MAX_POSITIONS", lo=0)  # 0 = tanpa batas
     _num("COOLDOWN_SEC", lo=0)
     _num("KLINES_LIMIT", lo=1, hi=1500)
     _num("HTTP_TIMEOUT", lo=0, strict_gt=True)

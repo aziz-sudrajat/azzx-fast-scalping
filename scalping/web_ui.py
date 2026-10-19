@@ -101,6 +101,7 @@ def _emit(ev: dict):
             _state["log"].append(line)
             _state["log"] = _state["log"][-200:]
             _state["closed"].append({
+                "id": ev.get("trade_id"),
                 "time": ev.get("time"), "side": ev.get("side"),
                 "symbol": ev.get("symbol", _state["symbol"]),
                 "entry": ev.get("entry"), "tp": ev.get("tp"),
@@ -204,6 +205,26 @@ def _get_positions():
     t = _state["trader"]
     if t is None:
         return []
+    mark = _safe_float((_state["last"] or {}).get("price"))
+    trades = getattr(t, "open_trades", None)
+    if trades is not None:
+        # multi-position: tiap entry = baris terpisah (TP/SL sendiri)
+        out = []
+        for tr in trades:
+            entry = _safe_float(tr.get("entry")) or 0.0
+            qty = _safe_float(tr.get("qty")) or 0.0
+            side = str(tr.get("side", "")).upper()
+            upnl = None
+            if mark and entry and qty:
+                upnl = (mark - entry) * qty if side == "LONG" \
+                    else (entry - mark) * qty
+            out.append({"id": tr.get("id"),
+                        "symbol": tr.get("symbol", _state["symbol"]),
+                        "side": side, "qty": qty, "entry": entry,
+                        "tp": tr.get("tp"), "sl": tr.get("sl"),
+                        "mark": mark, "upnl": upnl})
+        return out
+    # fallback: trader tanpa registry (1 posisi via broker)
     sym = _state["symbol"]
     try:
         pos = t.broker.get_position(sym)
@@ -216,7 +237,6 @@ def _get_positions():
     entry = _safe_float(pos.get("avg_price",
                                 pos.get("entry_price",
                                         pos.get("entryPrice", 0)))) or 0.0
-    mark = _safe_float((_state["last"] or {}).get("price"))
     upnl = None
     if mark and entry and qty:
         upnl = (mark - entry) * qty if side in ("BUY", "LONG") \
@@ -289,6 +309,12 @@ def _summary():
     positions = _get_positions()
     klines = _get_klines()
     price = _safe_float((_state["last"] or {}).get("price"))
+    risk_mp = 0
+    if t is not None and hasattr(t, "risk"):
+        try:
+            risk_mp = int(getattr(t.risk, "max_positions", 0) or 0)
+        except (TypeError, ValueError):
+            risk_mp = 0
     return {
         "mode": mode,
         "exchange": _state["exchange"],
@@ -304,6 +330,7 @@ def _summary():
         "win_rate": round(wins / trades_done * 100.0, 1) if trades_done else None,
         "open_positions": len(positions),
         "positions": positions,
+        "max_positions": risk_mp,
         "price": price,
         "klines": klines,
         "equity": equity,
@@ -333,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _start_trader(self, symbol, margin, lev, margin_mode, mode,
                       exchange="binance", strategy="signal", max_trades=0,
-                      confirm=""):
+                      confirm="", max_positions=None):
         if _state["running"]:
             return {"ok": False, "msg": "sudah berjalan",
                     "mode": _state["mode"]}
@@ -375,14 +402,21 @@ class Handler(BaseHTTPRequestHandler):
             qty = quantize_down(qty, broker.get_qty_step(symbol))
         if qty <= 0:
             return {"ok": False, "msg": "qty 0 setelah quantize"}
+        if max_positions in (None, ""):
+            mp = int(cfg.get("MAX_POSITIONS", 0))
+        else:
+            mp = int(max_positions)
+        if mp < 0:
+            return {"ok": False,
+                    "msg": "maxpositions tidak boleh negatif (0 = tanpa batas)"}
         risk = RiskGuard(
             max_daily_loss_usd=float(cfg.get("MAX_DAILY_LOSS_USD", 100.0)),
-            max_positions=int(cfg.get("MAX_POSITIONS", 1)),
+            max_positions=mp,
             cooldown_sec=float(cfg.get("COOLDOWN_SEC", 300.0)))
         if strategy == "signal":
             from .signal_loop import SignalTrader
             trader = SignalTrader(broker, data, cfg_mod, risk,
-                                  on_event=_emit, mode=mode)
+                                  on_event=_emit, mode=mode, leverage=lev)
         else:
             trader = AlternatingTrader(broker, data, cfg, risk, on_event=_emit)
         start_bal = None
@@ -469,7 +503,8 @@ class Handler(BaseHTTPRequestHandler):
                     g("exchange", "binance"),
                     g("strategy", "signal"),
                     int(g("maxtrades", "0") or "0"),
-                    g("confirm", ""))
+                    g("confirm", ""),
+                    max_positions=g("maxpositions", ""))
                 self._json(r)
             except SystemExit as e:
                 self._json({"ok": False, "msg": str(e)}, 400)
@@ -596,6 +631,14 @@ table.pos{width:100%;border-collapse:collapse;font-size:13px}
 table.pos th{color:#7b86a8;text-align:left;padding:6px;font-size:11px;letter-spacing:1px;text-transform:uppercase}
 table.pos td{padding:8px 6px;border-top:1px solid #1c2440}
 .up{color:#00e676}.dn{color:#ff5252}
+@keyframes trow-in{0%{opacity:0;transform:translateX(-16px);background:rgba(0,229,255,.20);box-shadow:0 0 16px rgba(0,229,255,.45)}55%{opacity:1;background:rgba(0,229,255,.06)}100%{opacity:1;transform:none;background:transparent;box-shadow:none}}
+.log .trow-new{animation:trow-in 1.8s ease-out}
+@keyframes shimmer{0%,100%{opacity:.4}50%{opacity:1}}
+.log .info{animation:shimmer 2.4s ease-in-out infinite}
+@keyframes upnl-up{0%{background:rgba(0,230,118,.4)}100%{background:transparent}}
+@keyframes upnl-dn{0%{background:rgba(255,82,82,.4)}100%{background:transparent}}
+td.flash-up{animation:upnl-up 1.1s ease-out}
+td.flash-dn{animation:upnl-dn 1.1s ease-out}
 @media(max-width:900px){.hero{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.desks{grid-template-columns:1fr 1fr}}
 @media(max-width:560px){.hero{grid-template-columns:1fr}.desks{grid-template-columns:1fr}}
 </style></head><body>
@@ -635,6 +678,7 @@ table.pos td{padding:8px 6px;border-top:1px solid #1c2440}
 <label>Exch<select id="exchange"><option value="binance">binance</option><option value="okx">okx</option><option value="bybit">bybit</option><option value="bitget">bitget</option></select></label>
 <label>Strategy<select id="strategy"><option value="signal">signal</option><option value="alternating">alternating</option></select></label>
 <label>MaxTr<input id="maxtrades" value="0" size="4"></label>
+<label>MaxPos<input id="maxpos" value="0" size="4" title="0 = tanpa batas"></label>
 </div>
 <div id="livewarn">&#x26A0;&#xFE0F; MODE LIVE &mdash; UANG ASLI! Ketik <code>SAYA PAHAM</code> di bawah untuk mengaktifkan Start.</div>
 <div id="liveconfirm"><label>Ketik SAYA PAHAM: <input id="confirmtxt" size="14" oninput="modeChanged()"></label></div>
@@ -694,6 +738,7 @@ function drawKlines(kl){
  c.fillStyle='#8b96bd';c.font='11px monospace';
  c.fillText(mx.toFixed(2),6,12);c.fillText(mn.toFixed(2),6,H-6);
 }
+const seenTrades=new Set();const prevUpnl={};
 function render(){
  fetch('/api/state').then(r=>r.json()).then(d=>{
   const b=document.getElementById('modebadge');b.textContent=d.mode;b.className='badge '+d.mode;
@@ -715,22 +760,32 @@ function render(){
   drawEquity(d.equity);drawKlines(d.klines);
   const pos=document.getElementById('positions');
   if(d.positions&&d.positions.length){
-   let h='<table class="pos"><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>uPnL</th></tr>';
+   let h='<table class="pos"><tr><th>#</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>TP</th><th>SL</th><th>Mark</th><th>uPnL</th></tr>';
    d.positions.forEach(p=>{
     const up=p.upnl==null?'\u2014':(p.upnl>=0?'+':'')+p.upnl.toFixed(2);
-    h+='<tr><td>'+esc(p.symbol)+'</td><td class="'+(p.side==='BUY'||p.side==='LONG'?'up':'dn')+'">'+esc(p.side)+'</td><td>'+p.qty+'</td><td>'+fp(p.entry)+'</td><td>'+(p.mark==null?'\u2014':fp(p.mark))+'</td><td class="'+(p.upnl!=null&&p.upnl<0?'dn':'up')+'">'+up+'</td></tr>';});
+    const pid='p'+(p.id==null?(p.symbol+':'+p.entry):p.id);
+    const prev=prevUpnl[pid];let fcls='';
+    if(prev!=null&&p.upnl!=null&&p.upnl!==prev)fcls=p.upnl>prev?'flash-up':'flash-dn';
+    if(p.upnl!=null)prevUpnl[pid]=p.upnl;
+    h+='<tr><td style="color:#5f6a8c">'+(p.id==null?'':p.id)+'</td><td>'+esc(p.symbol)+'</td><td class="'+(p.side==='BUY'||p.side==='LONG'?'up':'dn')+'">'+esc(p.side)+'</td><td>'+p.qty+'</td><td>'+fp(p.entry)+'</td><td class="up">'+(p.tp==null?'\u2014':fp(p.tp))+'</td><td class="dn">'+(p.sl==null?'\u2014':fp(p.sl))+'</td><td>'+(p.mark==null?'\u2014':fp(p.mark))+'</td><td class="'+(p.upnl!=null&&p.upnl<0?'dn':'up')+' '+fcls+'">'+up+'</td></tr>';});
    pos.innerHTML=h+'</table>';
-  }else{pos.innerHTML='<span style="color:#5f6a8c">tidak ada posisi</span>';}
+  }else{pos.innerHTML='<span style="color:#5f6a8c">tidak ada posisi</span>';for(const k in prevUpnl)delete prevUpnl[k];}
   // trade log: pakai /api/trades agar lengkap
   fetch('/api/trades').then(r=>r.json()).then(t=>{
-   const lg=document.getElementById('tradelog');lg.innerHTML='';
+   const lg=document.getElementById('tradelog');
    const arr=(t.trades||[]).slice(-40).reverse();
    if(!arr.length){lg.innerHTML='<div class="info">menunggu trade&hellip;</div>';return;}
+   const prevN=Number(lg.dataset.n||0);
+   lg.innerHTML='';
    arr.forEach(tr=>{
     const win=tr.pnl>=0,dv=document.createElement('div');
-    dv.className='trow '+(win?'trow-win':'trow-loss');
+    const tid=tr.id==null?('k'+tr.time+'|'+tr.entry):('id'+tr.id);
+    dv.className='trow '+(win?'trow-win':'trow-loss')+(seenTrades.has(tid)?'':' trow-new');
+    seenTrades.add(tid);
     dv.innerHTML='<span class="'+(win?'win':'loss')+'">'+(win?'\u25B2':'\u25BC')+' '+esc(tr.time)+' | '+esc(tr.side)+' '+esc(tr.symbol||'')+' | Entry '+fp(tr.entry)+' | PnL '+(tr.pnl>=0?'+':'')+Number(tr.pnl).toFixed(2)+' ['+esc(tr.why||'')+']</span>';
     lg.appendChild(dv);});
+   lg.dataset.n=arr.length;
+   if(arr.length>prevN)lg.scrollTop=0;
   });
 function tileAge(t){return (t&&t.epoch)?(Date.now()/1000-t.epoch):1e9;}
 function setBot(svgId,wrapId,cls,extra){
@@ -752,7 +807,7 @@ function setBot(svgId,wrapId,cls,extra){
   setBot('bot-engine','wrap-engine',en.status==='error'?'bot-alert':((en.status==='open'||en.status==='waiting')?'bot-work':'bot-idle'));
   const ls=en.last_signal;
   document.getElementById('desk-engine').innerHTML=
-   (ls?('<b class="'+(ls.side==='LONG'?'up':'dn')+'">'+esc(ls.side)+'</b> @ '+fp(ls.entry)+' (str '+ls.strength+'/3)<br><span class="ts">'+esc(ls.reason||'')+'</span>'):'<span class="ts">menunggu sinyal</span>')+
+   (ls?('<b class="'+(ls.side==='LONG'?'up':'dn')+'">'+esc(ls.side)+'</b> @ '+fp(ls.entry)+(ls.strength==null?'':' (str '+ls.strength+'/3)')+'<br><span class="ts">'+esc(ls.reason||'')+'</span>'):'<span class="ts">menunggu sinyal</span>')+
    '<br><span class="ts">status: '+esc(en.status)+' &middot; '+esc(en.ts||'')+'</span>';
   setLamp('lamp-exec',lampFor(ex.status));
   setBot('bot-exec','wrap-exec',ex.status==='error'?'bot-alert':((ex.status==='running'&&tileAge(ex)<60)?'bot-jump':'bot-idle'));
@@ -764,6 +819,7 @@ function setBot(svgId,wrapId,cls,extra){
   setLamp('lamp-risk',lampFor(rk.status));
   setBot('bot-risk','wrap-risk',(rk.killed||rk.status==='warning'||rk.status==='killed')?'bot-alert':'bot-sleep');
   document.getElementById('desk-risk').innerHTML=
+   'max pos: <b>'+(d.max_positions>0?d.max_positions:'\u221E')+'</b><br>'+
    'daily PnL: <b class="'+((rk.daily_pnl||0)<0?'dn':'up')+'">'+((rk.daily_pnl||0)>=0?'+':'')+Number(rk.daily_pnl||0).toFixed(2)+'</b> / -'+Number(rk.max_daily_loss||100).toFixed(0)+'<br>'+
    'kill-switch: <b class="'+(rk.killed?'dn':'up')+'">'+(rk.killed?'AKTIF':'off')+'</b>'+(rk.kill_reason?'<br><span class="ts">'+esc(rk.kill_reason)+'</span>':'')+
    '<br><span class="ts">'+esc(rk.ts||'')+'</span>';
@@ -782,7 +838,7 @@ function ctl(a){
   '&margin='+encodeURIComponent(gv('margin'))+'&lev='+encodeURIComponent(gv('lev'))+
   '&marginmode='+encodeURIComponent(gv('marginmode'))+'&mode='+encodeURIComponent(gv('mode'))+
   '&exchange='+encodeURIComponent(gv('exchange'))+'&strategy='+encodeURIComponent(gv('strategy'))+
-  '&maxtrades='+encodeURIComponent(gv('maxtrades'))+'&confirm='+encodeURIComponent(gv('confirmtxt')||'');
+  '&maxtrades='+encodeURIComponent(gv('maxtrades'))+'&maxpositions='+encodeURIComponent(gv('maxpos'))+'&confirm='+encodeURIComponent(gv('confirmtxt')||'');
  fetch(q,{method:'POST'}).then(r=>r.json()).then(d=>{
   document.getElementById('status').textContent=d.msg||a;
   const b=document.getElementById('modebadge');b.textContent=d.mode||'paper';b.className='badge '+(d.mode||'paper');

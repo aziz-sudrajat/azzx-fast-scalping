@@ -246,12 +246,12 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": False, "msg": "qty 0 setelah quantize"}
         risk = RiskGuard(
             max_daily_loss_usd=float(cfg.get("MAX_DAILY_LOSS_USD", 100.0)),
-            max_positions=int(cfg.get("MAX_POSITIONS", 1)),
+            max_positions=int(cfg.get("MAX_POSITIONS", 0)),  # 0 = tanpa batas
             cooldown_sec=float(cfg.get("COOLDOWN_SEC", 300.0)))
         if strategy == "signal":
             from .signal_loop import SignalTrader
             trader = SignalTrader(broker, data, cfg_mod, risk,
-                                  on_event=_emit, mode=mode)
+                                  on_event=_emit, mode=mode, leverage=lev)
         else:
             trader = AlternatingTrader(broker, data, cfg, risk, on_event=_emit)
         _state.update(trader=trader, running=True, mode=mode,
